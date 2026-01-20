@@ -2,78 +2,88 @@ import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Matriz de Decisão")
 
-st.title("Matriz de Decisão: Qual Banco Escolher?")
+# --- Dados dos Bancos ---
+db_data = {
+    "Aurora PostgreSQL": {
+        "metaphora": "Fila Única (Lock Pessimista)",
+        "motivacao": "Bancos tradicionais, baixo/médio TPS por conta, migração 'as-is' de legado.",
+        "garantia": "ACID completo, SQL padrão.",
+        "custo": "Sofre com Hot Partitions (a fila trava o sistema).",
+        "cenario": "Cenário A"
+    },
+    "DynamoDB (Padrão)": {
+        "metaphora": "Corrida com Versão (Lock Otimista)",
+        "motivacao": "Alta escala, varejo, Pix, microsserviços na AWS. Custo x Benefício excelente.",
+        "garantia": "Alta disponibilidade.",
+        "custo": "Exige controle de retry (com exponential backoff + jitter) na aplicação para evitar Race Conditions.",
+        "cenario": "Cenário B"
+    },
+    "DynamoDB + Sharding": {
+        "metaphora": "Múltiplos Cofres (Scatter-Gather)",
+        "motivacao": "Contas 'Baleia' (Ex: Conta concentradora do iFood ou Mercado Livre) com altíssima ingestão de créditos.",
+        "garantia": "Escalabilidade de escrita 'infinita'.",
+        "custo": "Leitura do saldo total é complexa/cara. Débito em tempo real é um grande desafio.",
+        "cenario": "Cenário C"
+    },
+    "CockroachDB": {
+        "metaphora": "Votação Global (Raft Consensus)",
+        "motivacao": "Banco Global, Multi-Região, necessidade de Strong Consistency sem perder a sintaxe SQL.",
+        "garantia": "Sobrevive à queda de um Data Center. Garante que o saldo nunca fure, mesmo com latência de rede.",
+        "custo": "Latência de escrita maior devido à comunicação entre nós (o preço da consistência global).",
+        "cenario": "Cenário D"
+    },
+    "ScyllaDB / Cassandra": {
+        "metaphora": "Pista Expressa (LSM-Tree) + Particionamento",
+        "motivacao": "Latência ultrabaixa e throughput massivo, quando a consistência forte não é o requisito principal para cada operação.",
+        "garantia": "Performance bruta por nó.",
+        "custo": "Consistência eventual por padrão, modelo de dados rígido e alta complexidade operacional.",
+        "cenario": "Não simulado diretamente (mas conceitos aplicados nos Cenários B e C)"
+    }
+}
+
+st.title("Matriz de Decisão Interativa")
 
 st.markdown("""
-Esta matriz resume as visualizações e cenários que exploramos. A escolha da tecnologia de banco de dados não é sobre "qual é a melhor", mas sim "qual é a mais adequada para o problema específico e os trade-offs que estamos dispostos a aceitar".
+Selecione uma tecnologia de banco de dados abaixo para ver uma análise detalhada de sua abordagem, motivação e os trade-offs envolvidos, baseada nos cenários que exploramos.
 """)
 
-st.table(
-    [
-        {
-            "Tecnologia": "Aurora PostgreSQL",
-            "Estrutura Visual (Metáfora)": "Fila Única (Lock Pessimista)",
-            "Quando Usar (Motivação)": "Bancos tradicionais, baixo/médio TPS por conta. Migração 'as-is' de legado.",
-            "Garantias e 'Custo'": "**Garantia:** ACID completo, SQL padrão. **Custo:** Sofre com Hot Partitions (a fila trava o sistema)."
-        },
-        {
-            "Tecnologia": "DynamoDB (Padrão)",
-            "Estrutura Visual (Metáfora)": "Corrida com Versão (Lock Otimista)",
-            "Quando Usar (Motivação)": "Alta escala, varejo, Pix, microsserviços na AWS. Custo x Benefício excelente.",
-            "Garantias e 'Custo'": "**Garantia:** Alta disponibilidade. **Custo:** Exige controle de retry na aplicação para evitar Race Conditions."
-        },
-        {
-            "Tecnologia": "DynamoDB + Sharding",
-            "Estrutura Visual (Metáfora)": "Múltiplos Cofres (Scatter-Gather)",
-            "Quando Usar (Motivação)": "Contas 'Baleia' (Ex: Conta concentradora do iFood ou Mercado Livre).",
-            "Garantias e 'Custo'": "**Garantia:** Escalabilidade de escrita 'infinita'. **Custo:** Leitura mais complexa/cara (tem que somar os cofres)."
-        },
-        {
-            "Tecnologia": "CockroachDB",
-            "Estrutura Visual (Metáfora)": "Votação (Raft Consensus)",
-            "Quando Usar (Motivação)": "Banco Global, Multi-Região, necessidade de Strong Consistency sem perder o SQL.",
-            "Garantias e 'Custo'": "**Garantia:** Sobrevive à queda de um Data Center. Garante que o saldo nunca fure. **Custo:** Latência de escrita maior devido à comunicação entre nós."
-        },
-        {
-            "Tecnologia": "ScyllaDB / Cassandra",
-            "Estrutura Visual (Metáfora)": "Pista Expressa (LSM-Tree) + Particionamento",
-            "Quando Usar (Motivação)": "Latência ultrabaixa e throughput massivo. Ótimo para Ledger de alta frequência.",
-            "Garantias e 'Custo'": "**Garantia:** Performance bruta por nó. **Custo:** Consistência eventual por padrão, modelo de dados rígido e complexidade operacional."
-        }
-    ]
+# --- Seletor Interativo ---
+option = st.selectbox(
+    "Selecione a Tecnologia de Banco de Dados:",
+    options=list(db_data.keys())
 )
 
-st.header("Resumo da 'Solução Intuitiva' para Saldos e Bloqueios")
-st.markdown("""
-A intuição final para modelar sistemas de saldo robustos é pensar em **"Pockets" (Bolsos)** e **operações atômicas**.
+st.divider()
 
-#### Visualizar os "Pockets" (Bolsos)
-Em vez de um único número `Saldo: 100`, a visualização correta (e a implementação no banco) é uma estrutura com múltiplos bolsos:
-- `saldo_disponivel: 80`
-- `saldo_bloqueado_judicial: 10`
-- `saldo_provisionado_cartao: 10`
+# --- Exibição das Informações ---
+if option:
+    data = db_data[option]
+    st.header(f"Análise: {option}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Metáfora Visual")
+        st.info(data["metaphora"])
+        
+        st.subheader("Quando Usar (Motivação)")
+        st.write(data["motivacao"])
+    
+    with col2:
+        st.subheader("Garantias")
+        st.success(f"✔️ {data['garantia']}")
 
-**Visualização:** Uma barra empilhada ou um JSON.
-```json
-{
-  "disponivel": 80,
-  "bloqueado_judicial": 10,
-  "provisionado_cartao": 10
-}
-```
+        st.subheader("Custo / Trade-off")
+        st.error(f"❌ {data['custo']}")
+        
+    st.subheader("Cenário de Simulação Relacionado")
+    st.page_link(f"pages/{data['cenario'].replace(' ', '_')}.py", label=f"Ir para a simulação do **{data['cenario']}**", icon="🔬")
 
-#### A Lógica do Bloqueio Atômico
-Quando uma ordem judicial chega, a operação não é "bloquear a conta". A operação é uma **transação atômica** que move dinheiro do bolso "Disponível" para o "Bloqueio Judicial".
+st.divider()
 
-- **Operação:** `UPDATE saldos SET disponivel = disponivel - 10, bloqueado_judicial = bloqueado_judicial + 10 WHERE ...`
-
-Se um Pix chegar no mesmo milissegundo, ele tentará debitar do bolso `disponivel`. Como o valor lá já diminuiu (graças à transação atômica do bloqueio), o Pix pode falhar por "Saldo Insuficiente", mas **o sistema nunca fica inconsistente**.
-
-**A visualização da atomicidade é a corrida que vimos nos cenários:** A operação que ganhar a "Votação" (CockroachDB) ou chegar primeiro no "Quadro Negro" (DynamoDB com CAS) vence. A outra falha matematicamente, não por sorte.
-""")
-
+# --- O restante do conteúdo permanece o mesmo ---
 st.header("Estratégias de Arquitetura para um Sistema de Pagamentos")
-
+# ... (o resto do arquivo que já existia)
 st.subheader("Estratégia 1: Convivência Híbrida (Mainframe + Cloud)")
 st.markdown("""
 **O Cenário:** O sistema de core banking (o "livro-razão" oficial) reside em um Mainframe que é lento, caro e suporta no máximo **40 transações por segundo (TPS)**. No entanto, o novo sistema de PIX precisa ser elástico, moderno e aguentar milhares de TPS.
@@ -106,4 +116,3 @@ st.markdown("""
     - **DynamoDB ou ScyllaDB** continuam sendo excelentes escolhas para registrar o "rastro" de cada transação (o *ledger de eventos*). Eles podem ingerir trilhões de eventos de auditoria com baixo custo e altíssima velocidade, sem sobrecarregar o banco de dados principal onde o saldo é mantido.
     - Essa separação de responsabilidades (um banco para o **estado atual do saldo** e outro para o **histórico imutável de eventos**) é um padrão de arquitetura muito robusto e escalável.
 """)
-

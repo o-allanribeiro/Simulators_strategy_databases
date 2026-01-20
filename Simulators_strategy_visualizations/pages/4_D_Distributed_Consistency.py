@@ -5,9 +5,8 @@ import pandas as pd
 st.set_page_config(layout="wide", page_title="Cenário D: Consistência Distribuída")
 
 def generate_consensus_graph(nodes, failed_nodes, leader, step):
-    # ... (O resto da função de geração de gráfico permanece o mesmo)
     dot = graphviz.Digraph('Consensus', comment='Raft/Paxos Voting')
-    dot.attr('graph', rankdir='TB', layout='sfdp')
+    dot.attr('graph', rankdir='TB', layout='neato', overlap='false', splines='true')
     dot.node_attr.update(shape='house', style='filled')
 
     for node in nodes:

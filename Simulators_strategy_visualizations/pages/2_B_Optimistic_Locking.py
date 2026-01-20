@@ -1,122 +1,175 @@
 import streamlit as st
 import graphviz
 import random
+import time
 import pandas as pd
-import numpy as np
 
-st.set_page_config(layout="wide", page_title="Cenário B: Bloqueio Otimista com DynamoDB")
+st.set_page_config(layout="wide", page_title="Modelo Físico: DynamoDB Sharding")
 
-# --- Funções de Simulação e Visualização ---
-def generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads, use_buffer):
-    dot = graphviz.Digraph('OptimisticLock', comment='Compare-and-Swap')
-    dot.attr('graph', rankdir='TB', splines='ortho')
+# --- Estado da Simulação ---
+if 'shards' not in st.session_state:
+    st.session_state.shards = [{"id": i, "wcu": 0, "requests": []} for i in range(10)]
+if 'log' not in st.session_state:
+    st.session_state.log = []
+if 'total_requests' not in st.session_state:
+    st.session_state.total_requests = 0
+if 'throttled_requests' not in st.session_state:
+    st.session_state.throttled_requests = 0
 
-    with dot.subgraph(name='cluster_app') as c:
-        c.attr(label='Aplicação (Threads processando PIX)', style='dashed')
-        c.node_attr.update(shape='circle')
-        for i in range(concurrency):
-            if i == winner_thread:
-                c.node(f'thread_{i}', f'Thread {i+1}', style='filled', fillcolor='lightgreen')
-            elif i in failed_threads:
-                c.node(f'thread_{i}', f'Thread {i+1}', style='filled', fillcolor='salmon')
-            else:
-                 c.node(f'thread_{i}', f'Thread {i+1}')
-    
-    with dot.subgraph(name='cluster_db') as c:
-        c.attr(label='Banco de Dados (DynamoDB)', style='filled', color='lightblue')
-        c.node('db_record', '{<pk> PK: CONTA-123 | Saldo: R$90 | Versão: 2}', shape='record')
+def reset_simulation():
+    st.session_state.shards = [{"id": i, "wcu": 0, "requests": []} for i in range(10)]
+    st.session_state.log = ["Simulação reiniciada."]
+    st.session_state.total_requests = 0
+    st.session_state.throttled_requests = 0
 
-    if use_buffer:
-        dot.node('buffer', 'Fila SQS por Conta\n(Garante 1 Thread por Vez)', shape='box', style='filled', fillcolor='lightyellow')
-        dot.edge(f'thread_{winner_thread}', 'buffer', style='solid', label='Consome da fila')
-        dot.edge('buffer', 'db_record', label=' Acesso Ordenado')
-        for i in failed_threads:
-            dot.edge(f'thread_{i}', 'buffer', style='dashed', label='Enfileirando')
-    
-    else: # Modo "corrida livre"
-        for i in range(concurrency):
-            label = 'Lendo Saldo (R$100, Versão 1)'
-            style = 'dotted'
-            color = 'black'
-            if i == winner_thread:
-                label = 'SUCESSO!\n(CAS: Versão 1 == 1)'
-                style = 'solid'
-                color = 'green'
-            elif i in failed_threads:
-                label = 'FALHA!\n(CAS: Versão 1 != 2)\nRETRY'
-                style = 'dashed'
-                color = 'red'
-            dot.edge(f'thread_{i}', 'db_record', label=label, color=color, fontcolor=color)
+# --- Funções de Visualização ---
+def create_dynamo_graph(shards, strategy, tps):
+    dot = graphviz.Digraph('DynamoDBShards', comment='DynamoDB Write Sharding')
+    dot.attr('graph', rankdir='TB', splines='ortho', label=f'Estratégia: {strategy} | Carga: {tps} TPS', fontname="Arial", fontsize="14")
+    dot.attr('node', shape='box', style='rounded,filled', fontname="Arial", fontsize="10")
 
+    # Limitar visualmente as requisições para não poluir
+    MAX_REQ_DISPLAY = 5
+
+    # Desenha as requisições recebidas
+    with dot.subgraph(name='cluster_requests') as c:
+        c.attr(label='', color='white')
+        
+        # Limita o número de requisições a serem exibidas
+        num_requests_to_show = min(tps // 100 if tps > 100 else 1, MAX_REQ_DISPLAY)
+        
+        for i in range(num_requests_to_show):
+            tx_id = f"tx_{random.randint(1000, 9999)}"
+            c.node(tx_id, f"Req {tx_id}", shape='ellipse', fillcolor='lightblue')
+
+            if strategy == "Single Partition":
+                target_shard_id = 0
+                dot.edge(tx_id, f"shard_0", style='dashed')
+            else: # Write Sharding
+                # O hash pode ser qualquer coisa, vamos simular aleatoriamente
+                target_shard_index = random.randint(0, 9)
+                dot.edge(tx_id, f"shard_{target_shard_index}", style='dashed')
+
+    # Desenha os shards (cofres)
+    with dot.subgraph(name='cluster_shards') as c:
+        c.attr(label='Partições Físicas (Shards) no DynamoDB', style='dashed', fontname="Arial", fontsize="12")
+        for i, shard in enumerate(shards):
+            wcu = shard['wcu']
+            
+            # Lógica de "Partição Quente"
+            if strategy == "Single Partition" and i == 0:
+                hot = wcu > 1000
+                color = 'salmon' if hot else 'lightgrey'
+                label = f"Shard {i} (PK: CONTA-123)\nWCU: {wcu}"
+                if hot:
+                    label += "\n🔥 HOT PARTITION 🔥\n(THROTTLING!)"
+            elif strategy != "Single Partition":
+                color = 'lightgrey'
+                label = f"Shard {i} (PK: CONTA-123#{i})\nWCU: {wcu}"
+            else: # Shards não utilizados no modo Single Partition
+                 label = f"Shard {i}\n(Inativo)"
+                 color = 'whitesmoke'
+
+            c.node(f"shard_{i}", label, fillcolor=color)
+            
     return dot
 
-# --- Interface do Streamlit ---
-def render_optimistic_locking_page():
-    st.title("Cenário B: O Bloqueio Otimista com DynamoDB")
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        st.header("Painel de Controle")
-        st.markdown("**Simulação: Black Friday em um Marketplace**")
-        concurrency = st.slider("Requisições PIX por segundo (TPS)", 2, 1000, 500)
-        use_buffer = st.checkbox("Usar Fila de Buffer (SQS) por Conta", value=False)
-        run_simulation = st.button("Executar Simulação de Concorrência")
-
-    with col2:
-        st.header("Visualização da Disputa pelo Saldo")
-        if run_simulation:
-            winner_thread = random.randint(0, concurrency - 1)
-            failed_threads = [i for i in range(concurrency) if i != winner_thread]
-            
-            st.write(f"1. **Cenário:** {concurrency} PIX Débito chegam **no mesmo instante** para a conta do marketplace.")
-            st.write(f"2. **Leitura Concorrente:** Todas as {concurrency} threads da aplicação leem o saldo da conta no DynamoDB: `(Saldo: R$100, Versão: 1)`. Elas fazem o cálculo do novo saldo em memória.")
-            st.write(f"3. **Disputa (Race Condition):** Todas tentam executar a escrita condicional. A **Thread {winner_thread + 1}** é a mais rápida e sua escrita é aceita, atualizando a versão para 2.")
-            st.write(f"4. **Falha e Retentativa:** As outras {concurrency - 1} threads recebem o erro `ConditionalCheckFailedException` e precisam reiniciar o ciclo: reler, recalcular e tentar escrever de novo.")
-
-            graph = generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads, use_buffer)
-            st.graphviz_chart(graph)
-        else:
-            st.info("Ajuste os controles e clique em 'Executar' para simular a disputa.")
-
-    st.header("Análise Técnica e de Escalabilidade")
-    st.markdown("""
-    **O Problema:** Como escalar uma conta de alto volume (ex: um marketplace na Black Friday com **500 TPS**), onde o bloqueio pessimista (Cenário A) é inviável?
-
-    **A Solução com DynamoDB (Otimista):** O DynamoDB não usa bloqueios, permitindo leituras massivamente paralelas. A consistência é garantida na escrita através de **Escritas Condicionais** (Compare-and-Swap). A aplicação tenta atualizar o item, mas adiciona uma `ConditionExpression` que verifica se o atributo de versão não mudou.
-
-    **Disrupção Matemática/Física (Latência vs. Carga):**
-    Sem uma fila, a performance se degrada com o aumento da concorrência. A probabilidade de uma transação falhar aumenta, levando a mais retentativas. Isso não só aumenta a latência média (cada retry é uma nova chamada de API), mas também o **custo**, pois cada tentativa de escrita consome WCUs (Write Capacity Units) no DynamoDB, mesmo que falhe.
-    """)
-
-    # --- Gráfico de Escalabilidade Simulado ---
-    tps_range = np.arange(10, 1001, 20)
-    # Latência sem buffer: cresce exponencialmente com a concorrência devido a retries
-    latency_no_buffer = 10 + (tps_range / 100) ** 2 
-    # Latência com buffer: estável, pois não há retries no DB
-    latency_with_buffer = np.full_like(tps_range, 15)
-
-    chart_data = pd.DataFrame({
-        "TPS Concorrente na Mesma Conta": tps_range,
-        "Latência Média (ms) - Sem Fila de Buffer": latency_no_buffer,
-        "Latência Média (ms) - Com Fila de Buffer (SQS)": latency_with_buffer
-    }).set_index("TPS Concorrente na Mesma Conta")
-
-    st.line_chart(chart_data)
-
-    st.header("Deep Dive: Estrutura e Configuração no DynamoDB")
-    st.markdown("""
-    Para implementar esta solução, a tabela no DynamoDB seria estruturada assim:
-    - **Partition Key (PK):** `ID da Conta` (ex: `CONTA-12345`). Garante que todos os dados de uma conta fiquem juntos na mesma partição física, otimizando a busca.
-    - **Atributos:**
-        - `saldo`: (Number) O valor do saldo.
-        - `versao`: (Number) O número de versão, incrementado a cada atualização.
-        - `ultima_atualizacao`: (String) Timestamp da modificação.
-
-    **Como o DynamoDB Funciona:**
-    - **Threads:** O DynamoDB é um serviço gerenciado. As "threads" que mencionamos são na sua **aplicação** (ex: Lambdas, contêineres ECS) que rodam em paralelo. O DynamoDB é construído para lidar com milhões de requisições simultâneas.
-    - **Capacidade (RCU/WCU):** Você provisiona (ou usa o modo On-Demand) a capacidade de leitura e escrita. Uma `Hot Partition` (muitas requisições para a mesma PK, como no nosso cenário) pode esgotar a capacidade provisionada para aquela partição física, causando `ThrottlingException`. A fila de buffer na aplicação ajuda a mitigar isso, suavizando os picos de escrita.
-    - **Escrita Condicional (A Mágica):** A API `UpdateItem` do DynamoDB permite a `ConditionExpression`. Nossa chamada seria algo como: `UpdateItem(TableName='...', Key={'PK': 'CONTA-123'}, UpdateExpression='SET saldo = :novo_saldo, versao = versao + 1', ConditionExpression='versao = :versao_antiga', ...)`
-    """)
+# --- Lógica da Simulação ---
+def run_dynamo_simulation(strategy, tps):
+    st.session_state.total_requests += tps
     
-render_optimistic_locking_page()
+    if strategy == "Single Partition":
+        shard = st.session_state.shards[0]
+        # Se a capacidade do shard (1000 WCU/s) for excedida
+        if shard['wcu'] + tps > 1000:
+            accepted_tps = 1000 - shard['wcu']
+            throttled_tps = tps - accepted_tps
+            st.session_state.throttled_requests += throttled_tps
+            shard['wcu'] = 1000
+            st.session_state.log.insert(0, f"🔴 Throttling! {throttled_tps} requisições rejeitadas. Partição 0 no limite.")
+        else:
+            accepted_tps = tps
+            shard['wcu'] += accepted_tps
+            st.session_state.log.insert(0, f"🟢 {accepted_tps} requisições aceitas no Shard 0.")
+    
+    else: # Write Sharding
+        # Distribui o TPS pelos 10 shards
+        for _ in range(tps):
+            target_shard_index = random.randint(0, 9)
+            st.session_state.shards[target_shard_index]['wcu'] += 1
+        st.session_state.log.insert(0, f"🟢 {tps} requisições distribuídas entre 10 shards.")
+
+# --- UI ---
+st.title("Modelo Físico: DynamoDB - Partições Quentes e Sharding")
+st.markdown("""
+Esta simulação demonstra o problema da **Hot Partition** no DynamoDB e como a estratégia de **Write Sharding** o resolve.
+- **Single Partition**: Todas as escritas para a mesma conta vão para a mesma partição física, que tem um limite de 1000 WCU/s.
+- **Write Sharding**: Adicionamos um sufixo aleatório à chave de partição (ex: `CONTA-123#1`, `CONTA-123#2`), distribuindo a carga entre múltiplas partições.
+""")
+
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.header("Painel de Controle")
+    strategy = st.radio(
+        "Estratégia de Armazenamento",
+        ("Single Partition", "Write Sharding"),
+        key='strategy',
+        help="Single Partition concentra a carga. Write Sharding a distribui."
+    )
+    tps = st.slider(
+        "Intensidade de Escrita (TPS)",
+        min_value=100,
+        max_value=5000,
+        step=100,
+        value=1000,
+        help="Simula o número de requisições de escrita por segundo para a mesma conta."
+    )
+    
+    if st.button("Executar Simulação (1 segundo)"):
+        run_dynamo_simulation(strategy, tps)
+
+    if st.button("Reiniciar Simulação"):
+        reset_simulation()
+        st.rerun()
+
+    st.subheader("Log de Eventos")
+    st.code('\n'.join(st.session_state.log[:10]), language='text')
+
+with col2:
+    st.header("Visualização da Distribuição de Carga")
+    
+    if not st.session_state.log:
+        st.info("Ajuste os controles e clique em 'Executar' para iniciar.")
+    else:
+        graph = create_dynamo_graph(st.session_state.shards, st.session_state.strategy, tps)
+        st.graphviz_chart(graph)
+        
+        st.subheader("Análise de Desempenho")
+        total_wcu = sum(s['wcu'] for s in st.session_state.shards)
+        
+        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1.metric("Requisições Totais", f"{st.session_state.total_requests}")
+        kpi2.metric("Requisições Rejeitadas", f"{st.session_state.throttled_requests}", delta=f"{st.session_state.throttled_requests/st.session_state.total_requests:.1%}" if st.session_state.total_requests > 0 else "0%", delta_color="inverse")
+        kpi3.metric("WCU Total Consumido", f"{total_wcu}")
+
+        # Gráfico de WCU por Shard
+        chart_data = pd.DataFrame({
+            "Shard": [f"Shard {s['id']}" for s in st.session_state.shards],
+            "WCU Consumido": [s['wcu'] for s in st.session_state.shards]
+        }).set_index("Shard")
+        
+        st.bar_chart(chart_data)
+
+st.header("Análise de Trade-offs")
+st.markdown("""
+| Estratégia | Performance de Escrita (Write) | Performance de Leitura (Read) | Custo | Complexidade |
+| :--- | :--- | :--- | :--- | :--- |
+| **Single Partition** |  limitada a 1000 WCU/s. **Gargalo** sob alta carga. | **Ótima**. O saldo total é lido de um único item. | Baixo | Baixa |
+| **Write Sharding** | **Altamente escalável**. A carga é distribuída. | **Pior**. Requer uma consulta a todos os N shards para calcular o saldo (`Scatter-Gather`), o que é mais lento e caro. | Alto | Alta |
+
+**O Custo da Leitura (Scatter-Gather):**
+Para obter o saldo total de uma conta com Write Sharding, não basta ler um item. É preciso fazer N leituras (uma para cada shard) e somar os resultados na aplicação. Isso aumenta a **latência** e o **custo** da operação de leitura de saldo.
+
+**Conclusão:** Write Sharding é uma técnica poderosa para escalar a **escrita** em contas de altíssimo volume, mas o preço a se pagar é uma maior complexidade e uma performance de **leitura** degradada. É um trade-off clássico em arquitetura de sistemas distribuídos.
+""")

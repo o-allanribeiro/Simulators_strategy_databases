@@ -78,4 +78,3 @@ def render_write_sharding_page():
         st.latex(r'''
         TPS_{escrita\_total} \approx TPS_{shard} \times N_{shards}
         ''')
-        st.markdown(
