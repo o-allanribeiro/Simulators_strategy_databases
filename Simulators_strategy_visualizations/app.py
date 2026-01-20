@@ -28,16 +28,16 @@ st.header("Cenários Disponíveis:")
 
 st.info("""
 **Cenário A: O Bloqueio Pessimista**  
-*Visualiza a "fila única" formada pelo `SELECT FOR UPDATE` em bancos como PostgreSQL e Aurora.*
+*Simula como bancos tradicionais (PostgreSQL) usam `SELECT FOR UPDATE` para processar um **PIX Débito**, criando uma fila e garantindo consistência, mas sacrificando a performance.*
 
 **Cenário B: O Bloqueio Otimista**  
-*Visualiza a "corrida pela escrita" com versionamento (Compare-and-Swap) em bancos como o DynamoDB.*
+*Simula como bancos NoSQL (DynamoDB) processam um **PIX Débito** concorrente usando versionamento (Compare-and-Swap), mostrando a "corrida pela escrita" e a necessidade de retentativas.*
 
 **Cenário C: Sharding de Saldo**  
-*Visualiza a estratégia de "múltiplos cofres" (Scatter-Gather) para escalar a escrita em contas "baleia".*
+*Simula como escalar a recepção de milhares de **PIX Crédito** para uma única conta "baleia" usando a técnica de "múltiplos cofres", e o desafio que isso cria para o **PIX Débito**.*
 
 **Cenário D: Consistência Distribuída**  
-*Visualiza o processo de "votação" e consenso (Raft/Paxos) em bancos de dados geograficamente distribuídos como CockroachDB.*
+*Simula como bancos de dados globais (CockroachDB) usam um processo de "votação" (consenso) para garantir que um **PIX Débito** seja consistente entre múltiplos datacenters.*
 """, icon="👉")
 
 st.sidebar.success("Selecione um cenário de simulação acima.")

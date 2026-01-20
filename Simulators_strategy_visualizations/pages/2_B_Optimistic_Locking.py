@@ -48,7 +48,6 @@ def generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads
 # --- Interface do Streamlit ---
 def render_optimistic_locking_page():
     st.title("Cenário B: O Bloqueio Otimista (DynamoDB - Modelo Itaú)")
-    st.image("https://i.imgur.com/gL8E3f6.png", caption="Visualização: Controle de Versão e Tentativa de Escrita (Compare-and-Swap)")
 
     col1, col2 = st.columns([1, 2])
 
@@ -79,17 +78,27 @@ def render_optimistic_locking_page():
         else:
             st.info("Ajuste os controles e clique em 'Executar Simulação' para ver o que acontece.")
             
-    st.header("Análise Teórica")
+    st.header("Análise Teórica no Contexto PIX")
     st.markdown("""
-    **O Problema:** Como escalar escritas em uma única conta sem usar o custoso `SELECT FOR UPDATE` do bloqueio pessimista.
+    **O Problema:** O bloqueio pessimista (Cenário A) não escala para contas com alto volume de transações PIX. Como processar múltiplos **PIX Débito** e **PIX Crédito** concorrentes em uma única conta sem criar uma fila massiva no banco de dados?
 
-    **A Solução (Otimista):** O sistema permite que todos leiam o dado, mas impõe uma condição na hora de escrever: a escrita só é aceita se o dado não tiver sido alterado por outra pessoa desde o momento da leitura. Isso é feito com um "Token de Versão" ou "Número de Versão".
+    **A Solução (Otimista com Compare-and-Swap - CAS):**
+    Bancos de dados como o DynamoDB são "otimistas". Eles assumem que conflitos são raros. Em vez de trancar a porta, todos podem ler o saldo ao mesmo tempo. A verificação acontece apenas no final.
 
-    - **O que a visualização mostra:** Múltiplas threads leem o saldo e a versão (`Versão: 1`). Todas tentam escrever o novo saldo, mas com a condição `SE a versão AINDA FOR 1`. Apenas a primeira que chega consegue. As outras recebem um erro e precisam reiniciar o processo: ler o novo saldo (`Versão: 2`), recalcular e tentar escrever de novo.
-    - **A Otimização (Solução do Itaú):** Para evitar a "briga" de retentativas no banco de dados (que é caro), a própria aplicação cria uma fila em memória para cada conta. Isso garante que as operações para uma mesma conta sejam serializadas *antes* de chegarem ao banco, transformando a "corrida livre" em uma "fila organizada" e eliminando a necessidade de retentativas.
-    - **Trade-offs:**
-        - **Prós:** Altamente escalável para leituras. O banco em si não se torna um gargalo de escrita, pois não há bloqueios longos.
-        - **Contras:** A lógica de "retry" se move para a aplicação, que se torna mais complexa. Em cenários de altíssima concorrência na mesma chave, a aplicação pode gastar muito tempo em retentativas se não houver uma otimização como a fila em memória.
+    O processo para um **PIX Débito** é:
+    1.  A aplicação lê o saldo da conta: `(Saldo: R$100, Versão: 1)`.
+    2.  Calcula o novo saldo localmente (ex: `R$100 - R$10 = R$90`).
+    3.  Tenta escrever no banco com uma condição: `UPDATE saldo SET valor=90, versao=2 WHERE id=? AND versao=1;`
+        - **Este é o Compare-and-Swap (CAS).** A escrita só funciona **SE** a versão no banco ainda for a mesma que a aplicação leu (versão 1).
+    4.  **Sucesso:** Se a versão bate, a escrita é feita e o novo número de versão (2) é salvo. A primeira thread a chegar vence.
+    5.  **Falha:** Se outra thread já atualizou o saldo (e a versão agora é 2), a condição `versao=1` falha. A transação é rejeitada com um `ConditionalCheckFailedException`. A aplicação precisa então reiniciar todo o processo: reler o saldo (`Versão: 2`), recalcular e tentar de novo.
+
+    - **O que a visualização mostra:** Múltiplas threads (processando múltiplos PIX) tentam escrever ao mesmo tempo. Apenas uma vence (luz verde). As outras falham (luz vermelha) e precisam entrar em um "loop de retry".
+    
+    - **A Otimização (Solução do Itaú com Fila em Memória):** O "loop de retry" pode ser caro e sobrecarregar a aplicação. A solução é organizar a bagunça *antes* de chegar no banco. A aplicação cria uma fila em memória (usando Kafka, SQS, ou um buffer local) para cada conta de destino. Isso garante que, para uma mesma conta, as operações PIX (débitos e créditos) sejam processadas uma de cada vez (Single Thread per Account), eliminando a chance de conflitos de versão e a necessidade de retentativas no banco de dados. O gargalo de concorrência é movido do banco para a aplicação, que é mais fácil e barato de escalar.
+    - **Trade-offs para PIX:**
+        - **Prós:** Extremamente escalável, pois não há bloqueios no banco, permitindo alta vazão de transações em contas diferentes.
+        - **Contras:** A complexidade do "loop de retry" é transferida para a aplicação. Sem uma fila de otimização, alta concorrência *na mesma conta* pode levar a muitas falhas e retentativas, aumentando a latência.
     """)
 
 render_optimistic_locking_page()

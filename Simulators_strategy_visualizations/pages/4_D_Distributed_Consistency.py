@@ -39,7 +39,6 @@ def generate_consensus_graph(nodes, failed_nodes, leader, step):
 # --- Interface do Streamlit ---
 def render_distributed_consistency_page():
     st.title("Cenário D: Consistência Distribuída (CockroachDB / ScyllaDB LWT)")
-    st.image("https://i.imgur.com/2A6nFz8.png", caption="Visualização: O Consenso (Raft/Paxos Voting)")
 
     col1, col2 = st.columns([1, 2])
 
@@ -79,21 +78,25 @@ def render_distributed_consistency_page():
             graph = generate_consensus_graph(active_nodes, failed_nodes, leader, step)
             st.graphviz_chart(graph)
             
-    st.header("Análise Teórica")
+    st.header("Análise Teórica no Contexto PIX")
     st.markdown(f"""
-    **O Problema:** Como garantir que o saldo de uma conta seja consistente em um banco de dados distribuído geograficamente, mesmo que um datacenter inteiro caia? Como evitar um "Split Brain", onde duas versões diferentes da verdade (do saldo) possam existir temporariamente?
+    **O Problema:** Uma conta de alto volume pertence a uma empresa global que opera no Brasil e na Europa. A empresa precisa de um **único balanço de saldo global**, mas com altíssima disponibilidade e resiliência a desastres. Como garantir que um **PIX Crédito** recebido no Brasil (processado pelo nó de São Paulo) e um **PIX Débito** para um fornecedor na Europa (processado pelo nó de Frankfurt) sejam ordenados corretamente, sem risco de inconsistência, mesmo que um dos datacenters caia no meio da operação?
 
-    **A Solução (Consenso):** Antes de confirmar uma escrita, a maioria dos nós que hospedam os dados precisa concordar com a operação. Esse processo de votação é gerenciado por um algoritmo de consenso como o **Raft** (usado no CockroachDB) ou o **Paxos** (usado para Lightweight Transactions no ScyllaDB e Cassandra).
+    **A Solução (Consenso Distribuído para Ordem Global):**
+    É aqui que o custo de latência do consenso se torna um investimento em corretude. Bancos como o CockroachDB usam o consenso (Raft) não apenas para tolerar falhas, mas para criar uma **ordem serializável global** para todas as transações.
 
-    - **O que a visualização mostra:**
-        1.  Uma escrita chega a um dos nós, que atua como **Líder** para aquela transação.
-        2.  O Líder envia uma proposta de escrita para os outros nós (**Seguidores**).
-        3.  Os Seguidores validam a proposta e enviam um voto de "Sim" de volta.
-        4.  Assim que o Líder recebe votos da **maioria** do grupo (o "quórum"), a transação é considerada confirmada (*committed*). Só então o cliente recebe a confirmação de sucesso.
-    - **Tolerância a Falhas:** Se um nó (ou até mesmo um datacenter) cair, o cluster continua funcionando normalmente, desde que a maioria dos nós ainda esteja online e possa formar um quórum. Se a maioria dos nós cair, o cluster para de aceitar escritas para evitar inconsistência.
-    - **Trade-offs:**
-        - **Prós:** Garante a maior consistência possível (Serializável) em um ambiente distribuído. Previne "Split Brain" e sobrevive a desastres regionais sem perda de dados.
-        - **Contras:** A latência de escrita é maior, pois exige pelo menos um round-trip de comunicação entre os nós do cluster para cada transação.
+    1.  A transação do **PIX Débito** chega a Frankfurt. O nó de Frankfurt se torna o **Líder** para esta transação.
+    2.  Simultaneamente, a transação do **PIX Crédito** chega a São Paulo, que se torna líder para *sua* transação.
+    3.  Ambos os líderes enviam propostas para os outros nós (os Seguidores) para "reservar" seu lugar na fila global de transações.
+    4.  Através do processo de votação, o protocolo de consenso estabelece uma ordem inequívoca. Por exemplo, o sistema pode decidir globalmente que a transação de CRÉDITO tem precedência.
+    5.  A transação de crédito é confirmada (commit) após obter quórum.
+    6.  A transação de débito, ao tentar obter seu quórum, agora verá o resultado da transação de crédito já aplicada, garantindo que o cálculo do saldo seja feito sobre o valor mais recente e correto.
+
+    - **O que a visualização mostra:** O mecanismo que permite essa ordem. Ao simular uma falha, você vê que a capacidade de formar um "acordo majoritário" (quórum) é a chave para o sistema continuar operando e, mais importante, continuar ordenando as transações corretamente. Sem quórum, o sistema para, pois não pode mais garantir essa ordem, o que para um sistema financeiro é a única decisão segura a ser tomada.
+    
+    - **Trade-offs para Contas de Alto Volume:**
+        - **Prós:** É a única maneira de garantir consistência ACID *serializável* em escala global. Para uma conta de alto volume que representa o caixa de uma empresa inteira, essa garantia não é negociável. Previne fraudes e erros contábeis que poderiam surgir de "race conditions" entre diferentes regiões.
+        - **Contras:** A latência é real. Cada transação paga o preço da comunicação inter-regional para garantir a consistência. Este modelo é escolhido quando a **corretude global** é mais importante para o negócio do que a **latência mínima** de cada transação individual.
     """)
 
 render_distributed_consistency_page()

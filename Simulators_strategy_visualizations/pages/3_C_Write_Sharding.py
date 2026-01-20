@@ -41,7 +41,6 @@ def generate_write_sharding_graph(transactions, num_shards, read_mode=False):
 # --- Interface do Streamlit ---
 def render_write_sharding_page():
     st.title("Cenário C: Sharding de Saldo (Write Sharding)")
-    st.image("https://i.imgur.com/v1nL0kF.png", caption="Visualização: Os Múltiplos Cofres (Scatter-Gather)")
 
     col1, col2 = st.columns([1, 2])
 
@@ -66,20 +65,29 @@ def render_write_sharding_page():
         graph = generate_write_sharding_graph(num_transactions, num_shards, read_mode)
         st.graphviz_chart(graph)
             
-    st.header("Análise Teórica")
+    st.header("Análise Teórica no Contexto PIX")
     st.markdown("""
-    **O Problema:** Uma única conta (uma *Hot Partition*) se torna um gargalo. Mesmo com o bloqueio otimista do DynamoDB, há um limite físico de quantas transações uma única partição/servidor pode aguentar (cerca de 1000 escritas por segundo). Como escalar além disso para contas "baleia" (ex: a conta de um grande marketplace)?
+    **O Problema:** A conta de um grande varejista precisa receber dezenas de milhares de **PIX Crédito** por segundo. As abordagens dos Cenários A e B, que operam em um único registro de saldo, não conseguem escalar para essa demanda, pois atingem o limite de escrita de uma única partição/servidor (Hot Partition).
 
-    **A Solução (Write Sharding):** Em vez de armazenar o saldo total em um único registro, nós o quebramos em múltiplos "cofres" ou "shards".
+    **A Solução (Write Sharding - Múltiplos Cofres):**
+    Esta estratégia é projetada para escalar a **escrita** de forma massiva. Em vez de um único registro de saldo, a conta é dividida em N "cofres" (shards).
 
-    - **O que a visualização mostra:**
-        - **Escrita (Scatter):** Quando uma transação de crédito chega, em vez de atualizar um saldo central, o sistema adiciona o valor a um dos N cofres, escolhido aleatoriamente (ou por um hash do ID da transação). Isso permite que N escritas ocorram em paralelo, pois elas estão operando em registros diferentes.
-        - **Leitura (Gather):** Para saber o saldo total, o sistema precisa fazer N leituras (uma para cada cofre) e somar os resultados na aplicação.
-    - **Trade-offs:**
-        - **Prós:** Escalabilidade de escrita virtualmente infinita para uma única entidade lógica (a conta "baleia").
-        - **Contras:**
-            - **Lentidão na Leitura:** As leituras se tornam muito mais lentas e caras, pois exigem a consulta a múltiplos registros/shards (operação de *Gather*).
-            - **Débitos Complexos:** Debitar da conta se torna um problema complexo. De qual cofre você tira o dinheiro? E se um cofre não tiver saldo suficiente? Isso geralmente exige um processo de "drenagem" assíncrono, onde os saldos dos cofres são periodicamente consolidados em um cofre principal, de onde os débitos são feitos.
+    - **Processando PIX Crédito (A Operação de "Scatter"):**
+        - Quando um PIX de crédito é recebido, o sistema não precisa ler o saldo atual. Ele simplesmente adiciona o valor a um dos N cofres.
+        - A escolha do cofre é geralmente feita por um hash do ID da transação PIX, o que distribui as escritas de forma aleatória e uniforme.
+        - **Resultado:** O sistema pode processar N créditos simultaneamente, um em cada cofre, sem nenhum tipo de bloqueio ou conflito. A capacidade de escrita é multiplicada por N.
+
+    - **O Grande Desafio: Processar PIX Débito (A Operação de "Gather"):**
+        - Esta é a parte difícil e o núcleo do seu problema de modelagem de débito. Para autorizar um **PIX Débito**, você precisa saber o saldo **total** e consolidado.
+        - **Leitura (Gather):** Como a visualização mostra, para obter o saldo total, a aplicação precisa ler o saldo parcial de **todos os N cofres** e somá-los. Esta operação é lenta, cara e complexa.
+        - **Execução do Débito:** Uma vez que você tem o saldo total, de qual cofre você subtrai o valor?
+            - Se você escolher um cofre aleatório, ele pode não ter saldo suficiente.
+            - Se você tentar debitar um pouco de cada cofre, a operação se torna uma transação distribuída complicada e lenta.
+        - **Solução Comum:** Geralmente, os débitos não são feitos diretamente dos cofres de escrita. Em vez disso, um processo assíncrono (um "dreno") periodicamente consolida o dinheiro dos múltiplos cofres em um único "cofre de pagamento" principal, de onde os **PIX Débito** são efetivamente realizados. Isso, no entanto, introduz latência (o dinheiro do crédito não fica disponível para débito instantaneamente).
+
+    - **Trade-offs para PIX:**
+        - **Prós:** Escalabilidade de **crédito** quase infinita. Perfeito para casos de uso de ingestão massiva de pagamentos.
+        - **Contras:** A leitura do saldo é lenta e cara. A lógica de **débito** se torna extremamente complexa e muitas vezes não é em tempo real, o que pode não ser aceitável para todos os modelos de negócio.
     """)
 
 render_write_sharding_page()

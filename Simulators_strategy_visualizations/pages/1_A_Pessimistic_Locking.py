@@ -6,7 +6,6 @@ st.set_page_config(layout="wide", page_title="Cenário A: Bloqueio Pessimista")
 
 def render_pessimistic_locking_page():
     st.title("Cenário A: O Bloqueio Pessimista (PostgreSQL / Aurora)")
-    st.image("https://i.imgur.com/7H2gn5Y.png", caption="Visualização: A Fila Única (The Single Lane Queue)")
 
     col1, col2 = st.columns([1, 2])
 
@@ -75,16 +74,24 @@ def render_pessimistic_locking_page():
         else:
             st.info("Ajuste os controles e clique em 'Executar Simulação' para ver o que acontece.")
     
-    st.header("Análise Teórica")
+    st.header("Análise Teórica no Contexto PIX")
     st.markdown("""
-    **O Problema:** Garantir que o saldo de uma conta não fique negativo ou inconsistente quando múltiplas transações (débitos) tentam alterá-lo ao mesmo tempo.
+    **O Problema:** Como um sistema de pagamentos processa um **PIX Débito** na conta de um cliente, garantindo que o saldo não fique negativo se, no mesmo instante, outros débitos (ou mesmo um estorno de crédito) estiverem acontecendo?
 
-    **A Solução (Pessimista):** O banco de dados "tranca" a linha da conta com o comando `SELECT FOR UPDATE`. Isso força qualquer outra transação que queira mexer naquela mesma linha a esperar em uma fila.
+    **A Solução (Pessimista com `SELECT FOR UPDATE`):**
+    A abordagem tradicional em bancos de dados como PostgreSQL ou Aurora é ser "pessimista". Ao processar um PIX Débito, o sistema executa os seguintes passos:
+    1.  `BEGIN TRANSACTION;`
+    2.  `SELECT saldo FROM contas WHERE id = ? FOR UPDATE;`
+        - **Este é o comando chave.** O `FOR UPDATE` age como uma tranca na porta da sala. O banco de dados bloqueia a linha específica daquela conta.
+        - Qualquer outra transação (outro PIX Débito, uma transferência, um pagamento de boleto) que tente ler *esta mesma linha com `FOR UPDATE`* é colocada em uma fila.
+    3.  A aplicação verifica se o saldo é suficiente.
+    4.  Se sim, `UPDATE contas SET saldo = saldo - ? WHERE id = ?;`
+    5.  `COMMIT;` (A tranca é liberada e o próximo da fila pode entrar).
 
-    - **O que a visualização mostra:** Quando uma transação (bonequinho) adquire o "lock", ela entra na "sala" para trabalhar no saldo. As outras transações concorrentes são forçadas a formar uma fila do lado de fora.
-    - **Trade-offs:**
-        - **Prós:** Garante consistência de forma muito forte e simples. É o comportamento padrão e esperado de bancos de dados relacionais.
-        - **Contras:** Funciona mal para *Hot Partitions* (ou "Hot Rows") - contas que recebem um volume muito alto de transações concorrentes (ex: a conta de um grande varejista no dia da Black Friday). A fila cresce, a latência aumenta drasticamente e o sistema inteiro pode ser afetado pelo gargalo em uma única conta.
+    - **O que a visualização mostra:** A "Thread Ativa" é a transação do PIX Débito que conseguiu o bloqueio. A "Fila de Espera" são as outras transações (outros PIX) que estão aguardando a liberação da tranca para poderem acessar o saldo.
+    - **Trade-offs para PIX:**
+        - **Prós:** Garante consistência de forma absoluta e simples de implementar. É a maneira mais segura de evitar que o saldo "fure" (double-spending).
+        - **Contras:** É um desastre para contas muito ativas (*Hot Partitions*). Imagine a conta de um grande e-commerce na Black Friday recebendo milhares de **PIX Crédito** e, ao mesmo tempo, tentando fazer um **PIX Débito** para um fornecedor. A fila para acessar o saldo dessa única conta pode travar o sistema. A latência de cada PIX aumenta drasticamente, pois todos precisam esperar sua vez na "fila da porta".
     """)
 
 render_pessimistic_locking_page()
