@@ -1,3 +1,11 @@
 import streamlit as st
 
-st.warning("Esta página foi descontinuada. Por favor, use as novas páginas de cenário no menu lateral.", icon="⚠️")
+st.set_page_config(layout="wide")
+
+st.warning("Esta página foi descontinuada.", icon="⚠️")
+
+st.markdown("""
+O conteúdo desta página foi movido e expandido na página **`7_Versioning_Teoria`**.
+
+Por favor, selecione a página correta no menu lateral. Este atalho será removido em uma futura atualização.
+""")

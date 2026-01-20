@@ -1,102 +1,109 @@
 import streamlit as st
 import graphviz
+import pandas as pd
 
 st.set_page_config(layout="wide", page_title="Cenário D: Consistência Distribuída")
 
-# --- Funções de Simulação e Visualização ---
 def generate_consensus_graph(nodes, failed_nodes, leader, step):
+    # ... (O resto da função de geração de gráfico permanece o mesmo)
     dot = graphviz.Digraph('Consensus', comment='Raft/Paxos Voting')
-    dot.attr('graph', rankdir='TB', layout='sfdp') # Use a force-directed layout
-    dot.node_attr.update(shape='circle', style='filled')
+    dot.attr('graph', rankdir='TB', layout='sfdp')
+    dot.node_attr.update(shape='house', style='filled')
 
-    # --- Nós do Cluster ---
     for node in nodes:
         if node in failed_nodes:
-            dot.node(node, f'Node {node}\n(FAILED)', fillcolor='grey', fontcolor='white')
+            dot.node(node, f'Datacenter {node}\n(FALHOU)', fillcolor='grey', fontcolor='white')
         elif node == leader:
-            dot.node(node, f'Node {node}\n(LEADER)', fillcolor='lightblue')
+            dot.node(node, f'Datacenter {node}\n(LÍDER)', fillcolor='lightblue')
         else:
-            dot.node(node, f'Node {node}\n(FOLLOWER)', fillcolor='lightgreen')
+            dot.node(node, f'Datacenter {node}\n(SEGUIDOR)', fillcolor='lightgreen')
 
-    # --- Lógica de Visualização por Passo ---
     followers = [n for n in nodes if n != leader and n not in failed_nodes]
     
-    if step >= 1: # Líder envia proposta
+    if step >= 1:
         for follower in followers:
-            dot.edge(leader, follower, label=' Proposta de Escrita', style='dashed', dir='forward')
+            dot.edge(leader, follower, label=' Proposta de PIX', style='dashed', dir='forward')
     
-    if step >= 2: # Seguidores respondem
+    if step >= 2:
         for follower in followers:
             dot.edge(follower, leader, label=' Voto "Sim"', style='dashed', dir='back')
             
-    if step == 3: # Quórum alcançado
-        dot.node('quorum_status', 'QUÓRUM ALCANÇADO!', shape='box', style='filled', fillcolor='orange')
+    if step == 3:
+        dot.node('quorum_status', 'QUÓRUM ALCANÇADO!\nPIX Confirmado', shape='box', style='filled', fillcolor='orange')
         dot.edge(leader, 'quorum_status', style='invis')
-
-
     return dot
 
-# --- Interface do Streamlit ---
 def render_distributed_consistency_page():
-    st.title("Cenário D: Consistência Distribuída (CockroachDB / ScyllaDB LWT)")
+    st.title("Cenário D: Consistência Distribuída (CockroachDB)")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.header("Painel de Controle")
-        nodes_options = ["São Paulo", "Rio de Janeiro", "New York", "Tokyo", "Frankfurt"]
-        active_nodes = st.multiselect("Nós Ativos no Cluster", options=nodes_options, default=["São Paulo", "Rio de Janeiro", "New York"])
-        failed_nodes = st.multiselect("Simular Falha de Nós", options=active_nodes)
+        nodes_options = ["São Paulo", "Rio de Janeiro", "Virginia (EUA)", "Oregon (EUA)", "Frankfurt (ALE)"]
+        active_nodes = st.multiselect("Datacenters no Cluster Global", options=nodes_options, default=["São Paulo", "Virginia (EUA)", "Frankfurt (ALE)"])
+        failed_nodes = st.multiselect("Simular Falha de Datacenter", options=active_nodes)
         
         st.header("Simulação Passo-a-Passo")
-        step = st.slider("Avançar na Simulação", 0, 3, 0, 
-                         format="Passo %d",
-                         help="Passo 0: Início. Passo 1: Líder envia proposta. Passo 2: Seguidores respondem. Passo 3: Quórum confirmado.")
+        step = st.slider("Avançar na Votação do PIX", 0, 3, 0, format="Passo %d")
 
     with col2:
-        st.header("Visualização do 'Motor'")
-
+        st.header("Visualização do 'Motor' de Consenso")
         if len(active_nodes) < 3:
             st.error("Um cluster de consenso precisa de pelo menos 3 nós para ser tolerante a falhas.")
         else:
-            # --- Lógica da Simulação ---
-            leader = active_nodes[0] # Simplificação: o primeiro nó é sempre o líder
+            leader = active_nodes[0]
             live_nodes = [n for n in active_nodes if n not in failed_nodes]
             quorum_needed = len(active_nodes) // 2 + 1
             
-            st.write(f"**Total de Nós:** {len(active_nodes)}")
-            st.write(f"**Nós Ativos:** {len(live_nodes)}")
+            st.write(f"**Total de Datacenters:** {len(active_nodes)}")
+            st.write(f"**Datacenters Ativos:** {len(live_nodes)}")
             st.write(f"**Quórum Necessário (Maioria):** {quorum_needed} votos")
 
             if len(live_nodes) >= quorum_needed:
-                st.success(f"O cluster está saudável. Com {len(live_nodes)} nós ativos, é possível alcançar o quórum de {quorum_needed} votos.")
-                if step == 3:
-                     st.info("O líder recebeu votos suficientes, a escrita é confirmada (commit) e o novo saldo é replicado para todos.")
+                st.success(f"Cluster SAUDÁVEL. Com {len(live_nodes)} datacenters ativos, é possível alcançar o quórum de {quorum_needed} votos.")
             else:
-                st.error(f"O cluster perdeu o quórum! Com apenas {len(live_nodes)} nós ativos, é impossível alcançar os {quorum_needed} votos necessários. O cluster não aceitará novas escritas para garantir a consistência.")
+                st.error(f"Cluster DEGRADADO. Com apenas {len(live_nodes)} datacenters ativos, é impossível alcançar o quórum. O sistema não aceitará novas transações PIX para garantir a consistência.")
             
             graph = generate_consensus_graph(active_nodes, failed_nodes, leader, step)
             st.graphviz_chart(graph)
             
     st.header("Análise Teórica no Contexto PIX")
-    st.markdown(f"""
-    **O Problema:** Uma conta de alto volume pertence a uma empresa global que opera no Brasil e na Europa. A empresa precisa de um **único balanço de saldo global**, mas com altíssima disponibilidade e resiliência a desastres. Como garantir que um **PIX Crédito** recebido no Brasil (processado pelo nó de São Paulo) e um **PIX Débito** para um fornecedor na Europa (processado pelo nó de Frankfurt) sejam ordenados corretamente, sem risco de inconsistência, mesmo que um dos datacenters caia no meio da operação?
+    st.markdown("""
+    **O Problema:** Uma conta de alto volume de uma empresa global precisa de um balanço de saldo único e consistente, mesmo com datacenters espalhados pelo mundo. Como garantir que um **PIX Crédito** no Brasil e um **PIX Débito** na Europa sejam ordenados corretamente, sem risco de inconsistência, mesmo com falhas?
 
-    **A Solução (Consenso Distribuído para Ordem Global):**
-    É aqui que o custo de latência do consenso se torna um investimento em corretude. Bancos como o CockroachDB usam o consenso (Raft) não apenas para tolerar falhas, mas para criar uma **ordem serializável global** para todas as transações.
+    **A Solução (Consenso Distribuído):** Bancos como o CockroachDB usam o consenso (Raft) para criar uma **ordem serializável global** para todas as transações. A "votação" que a simulação mostra é o mecanismo que garante essa ordem única e a resiliência a desastres.
+    """)
 
-    1.  A transação do **PIX Débito** chega a Frankfurt. O nó de Frankfurt se torna o **Líder** para esta transação.
-    2.  Simultaneamente, a transação do **PIX Crédito** chega a São Paulo, que se torna líder para *sua* transação.
-    3.  Ambos os líderes enviam propostas para os outros nós (os Seguidores) para "reservar" seu lugar na fila global de transações.
-    4.  Através do processo de votação, o protocolo de consenso estabelece uma ordem inequívoca. Por exemplo, o sistema pode decidir globalmente que a transação de CRÉDITO tem precedência.
-    5.  A transação de crédito é confirmada (commit) após obter quórum.
-    6.  A transação de débito, ao tentar obter seu quórum, agora verá o resultado da transação de crédito já aplicada, garantindo que o cálculo do saldo seja feito sobre o valor mais recente e correto.
+    st.header("Disrupção Matemática e Física")
+    col3, col4 = st.columns(2)
+    with col3:
+        st.subheader("A Matemática do Quórum")
+        st.markdown("**Garantia contra Split-Brain:**")
+        st.latex(r'''
+        Quorum = \lfloor \frac{N_{replicas}}{2} \rfloor + 1
+        ''')
+        st.markdown("Com esta fórmula, é matematicamente impossível que dois grupos de nós consigam quórum ao mesmo tempo. Qualquer subgrupo com quórum terá pelo menos um membro em comum com qualquer outro subgrupo com quórum. Este membro em comum 'lembra' da última transação e impede a criação de duas 'verdades' diferentes.")
+    with col4:
+        st.subheader("A Física da Latência")
+        st.markdown("**O Limite da Velocidade da Luz:**")
+        st.latex(r'''
+        Lat_{escrita} \geq 2 \times Lat_{rede_inter_regional}
+        ''')
+        st.markdown("Uma transação exige, no mínimo, uma viagem de ida (proposta) e volta (voto) entre o líder e seus seguidores. A performance é fisicamente limitada pela distância geográfica entre os datacenters.")
 
-    - **O que a visualização mostra:** O mecanismo que permite essa ordem. Ao simular uma falha, você vê que a capacidade de formar um "acordo majoritário" (quórum) é a chave para o sistema continuar operando e, mais importante, continuar ordenando as transações corretamente. Sem quórum, o sistema para, pois não pode mais garantir essa ordem, o que para um sistema financeiro é a única decisão segura a ser tomada.
-    
-    - **Trade-offs para Contas de Alto Volume:**
-        - **Prós:** É a única maneira de garantir consistência ACID *serializável* em escala global. Para uma conta de alto volume que representa o caixa de uma empresa inteira, essa garantia não é negociável. Previne fraudes e erros contábeis que poderiam surgir de "race conditions" entre diferentes regiões.
-        - **Contras:** A latência é real. Cada transação paga o preço da comunicação inter-regional para garantir a consistência. Este modelo é escolhido quando a **corretude global** é mais importante para o negócio do que a **latência mínima** de cada transação individual.
+    st.subheader("Tabela de Latência (Estimativa)")
+    latency_data = {
+        "Cluster": ["SP-RJ (Mesmo país)", "SP-Virginia (Continentes diferentes)", "SP-Frankfurt-Tokyo (Global)"],
+        "Latência de Rede (Round-Trip)": ["~15ms", "~120ms", "~250ms"],
+        "Latência Mínima por PIX": ["~30ms", "~240ms", "~500ms"]
+    }
+    st.table(pd.DataFrame(latency_data))
+
+    st.header("Trade-offs para Contas de Alto Volume")
+    st.markdown("""
+        - **Prós:** A mais alta garantia de consistência (`SERIALIZABLE`) em escala global. Tolera a falha de datacenters inteiros. Para uma conta que representa o caixa global de uma empresa, essa garantia não é negociável.
+        - **Contras:** A latência é real e um fator limitante. Este modelo é escolhido quando a **corretude global** é mais importante para o negócio do que a **latência mínima** de cada transação individual.
     """)
 
 render_distributed_consistency_page()

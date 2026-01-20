@@ -1,17 +1,18 @@
 import streamlit as st
 import graphviz
 import random
+import pandas as pd
+import numpy as np
 
-st.set_page_config(layout="wide", page_title="Cenário B: Bloqueio Otimista")
+st.set_page_config(layout="wide", page_title="Cenário B: Bloqueio Otimista com DynamoDB")
 
 # --- Funções de Simulação e Visualização ---
 def generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads, use_buffer):
     dot = graphviz.Digraph('OptimisticLock', comment='Compare-and-Swap')
     dot.attr('graph', rankdir='TB', splines='ortho')
 
-    # --- Subgrafo da Aplicação (Threads) ---
     with dot.subgraph(name='cluster_app') as c:
-        c.attr(label='Aplicação (Threads Concorrentes)', style='dashed')
+        c.attr(label='Aplicação (Threads processando PIX)', style='dashed')
         c.node_attr.update(shape='circle')
         for i in range(concurrency):
             if i == winner_thread:
@@ -21,84 +22,101 @@ def generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads
             else:
                  c.node(f'thread_{i}', f'Thread {i+1}')
     
-    # --- Subgrafo do Banco de Dados ---
     with dot.subgraph(name='cluster_db') as c:
         c.attr(label='Banco de Dados (DynamoDB)', style='filled', color='lightblue')
-        c.node('db_record', '{Saldo: R$90 | Versão: 2}', shape='record')
+        c.node('db_record', '{<pk> PK: CONTA-123 | Saldo: R$90 | Versão: 2}', shape='record')
 
-    # --- Fila de Buffer (Solução Itaú) ---
     if use_buffer:
-        dot.node('buffer', 'Fila em Memória\n(Single Thread per Account)', shape='box', style='filled', fillcolor='lightyellow')
-        dot.edge('thread_0', 'buffer', style='invis') # Apenas para layout
+        dot.node('buffer', 'Fila SQS por Conta\n(Garante 1 Thread por Vez)', shape='box', style='filled', fillcolor='lightyellow')
+        dot.edge(f'thread_{winner_thread}', 'buffer', style='solid', label='Consome da fila')
         dot.edge('buffer', 'db_record', label=' Acesso Ordenado')
+        for i in failed_threads:
+            dot.edge(f'thread_{i}', 'buffer', style='dashed', label='Enfileirando')
     
-    # --- Conexões ---
-    if not use_buffer:
-        # Modo "corrida livre"
+    else: # Modo "corrida livre"
         for i in range(concurrency):
+            label = 'Lendo Saldo (R$100, Versão 1)'
+            style = 'dotted'
+            color = 'black'
             if i == winner_thread:
-                dot.edge(f'thread_{i}', 'db_record', label=' Escreveu com Sucesso!\n(CAS: Versão 1 == 1)', color='green', fontcolor='green')
+                label = 'SUCESSO!\n(CAS: Versão 1 == 1)'
+                style = 'solid'
+                color = 'green'
             elif i in failed_threads:
-                dot.edge(f'thread_{i}', 'db_record', label=' Falha na Escrita!\n(CAS: Versão 1 != 2)', color='red', fontcolor='red', style='dashed')
-            else:
-                dot.edge(f'thread_{i}', 'db_record', label='Lendo Saldo (R$100, Versão 1)', style='dotted')
+                label = 'FALHA!\n(CAS: Versão 1 != 2)\nRETRY'
+                style = 'dashed'
+                color = 'red'
+            dot.edge(f'thread_{i}', 'db_record', label=label, color=color, fontcolor=color)
 
     return dot
 
 # --- Interface do Streamlit ---
 def render_optimistic_locking_page():
-    st.title("Cenário B: O Bloqueio Otimista (DynamoDB - Modelo Itaú)")
+    st.title("Cenário B: O Bloqueio Otimista com DynamoDB")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.header("Painel de Controle")
-        concurrency = st.slider("Threads Concorrentes na Mesma Conta", 2, 50, 5)
-        use_buffer = st.checkbox("Usar Fila em Memória (Otimização Itaú)", value=False)
-        run_simulation = st.button("Executar Simulação")
+        st.markdown("**Simulação: Black Friday em um Marketplace**")
+        concurrency = st.slider("Requisições PIX por segundo (TPS)", 2, 1000, 500)
+        use_buffer = st.checkbox("Usar Fila de Buffer (SQS) por Conta", value=False)
+        run_simulation = st.button("Executar Simulação de Concorrência")
 
     with col2:
-        st.header("Visualização do 'Motor'")
-
+        st.header("Visualização da Disputa pelo Saldo")
         if run_simulation:
-            # --- Lógica da Simulação ---
-            # Todas as threads leem a versão 1
-            st.write("1. **Leitura Concorrente:** Todas as threads leem `Saldo: R$100, Versão: 1` ao mesmo tempo.")
-            
-            # Uma thread vence a "corrida"
             winner_thread = random.randint(0, concurrency - 1)
             failed_threads = [i for i in range(concurrency) if i != winner_thread]
             
-            st.write(f"2. **Tentativa de Escrita:** Todas tentam atualizar o saldo. A **Thread {winner_thread + 1}** chega primeiro!")
-            st.write("3. **Compare-and-Swap (CAS):** O banco verifica se a versão ainda é 1. Como é, a escrita da Thread vencedora é aceita e a versão é atualizada para 2.")
-            st.write(f"4. **Rejeição:** As outras {concurrency - 1} threads são rejeitadas, pois a versão que elas leram (1) é diferente da versão atual no banco (2). Elas recebem um erro e precisam tentar novamente (Retry Loop).")
+            st.write(f"1. **Cenário:** {concurrency} PIX Débito chegam **no mesmo instante** para a conta do marketplace.")
+            st.write(f"2. **Leitura Concorrente:** Todas as {concurrency} threads da aplicação leem o saldo da conta no DynamoDB: `(Saldo: R$100, Versão: 1)`. Elas fazem o cálculo do novo saldo em memória.")
+            st.write(f"3. **Disputa (Race Condition):** Todas tentam executar a escrita condicional. A **Thread {winner_thread + 1}** é a mais rápida e sua escrita é aceita, atualizando a versão para 2.")
+            st.write(f"4. **Falha e Retentativa:** As outras {concurrency - 1} threads recebem o erro `ConditionalCheckFailedException` e precisam reiniciar o ciclo: reler, recalcular e tentar escrever de novo.")
 
             graph = generate_optimistic_locking_graph(concurrency, winner_thread, failed_threads, use_buffer)
             st.graphviz_chart(graph)
         else:
-            st.info("Ajuste os controles e clique em 'Executar Simulação' para ver o que acontece.")
-            
-    st.header("Análise Teórica no Contexto PIX")
+            st.info("Ajuste os controles e clique em 'Executar' para simular a disputa.")
+
+    st.header("Análise Técnica e de Escalabilidade")
     st.markdown("""
-    **O Problema:** O bloqueio pessimista (Cenário A) não escala para contas com alto volume de transações PIX. Como processar múltiplos **PIX Débito** e **PIX Crédito** concorrentes em uma única conta sem criar uma fila massiva no banco de dados?
+    **O Problema:** Como escalar uma conta de alto volume (ex: um marketplace na Black Friday com **500 TPS**), onde o bloqueio pessimista (Cenário A) é inviável?
 
-    **A Solução (Otimista com Compare-and-Swap - CAS):**
-    Bancos de dados como o DynamoDB são "otimistas". Eles assumem que conflitos são raros. Em vez de trancar a porta, todos podem ler o saldo ao mesmo tempo. A verificação acontece apenas no final.
+    **A Solução com DynamoDB (Otimista):** O DynamoDB não usa bloqueios, permitindo leituras massivamente paralelas. A consistência é garantida na escrita através de **Escritas Condicionais** (Compare-and-Swap). A aplicação tenta atualizar o item, mas adiciona uma `ConditionExpression` que verifica se o atributo de versão não mudou.
 
-    O processo para um **PIX Débito** é:
-    1.  A aplicação lê o saldo da conta: `(Saldo: R$100, Versão: 1)`.
-    2.  Calcula o novo saldo localmente (ex: `R$100 - R$10 = R$90`).
-    3.  Tenta escrever no banco com uma condição: `UPDATE saldo SET valor=90, versao=2 WHERE id=? AND versao=1;`
-        - **Este é o Compare-and-Swap (CAS).** A escrita só funciona **SE** a versão no banco ainda for a mesma que a aplicação leu (versão 1).
-    4.  **Sucesso:** Se a versão bate, a escrita é feita e o novo número de versão (2) é salvo. A primeira thread a chegar vence.
-    5.  **Falha:** Se outra thread já atualizou o saldo (e a versão agora é 2), a condição `versao=1` falha. A transação é rejeitada com um `ConditionalCheckFailedException`. A aplicação precisa então reiniciar todo o processo: reler o saldo (`Versão: 2`), recalcular e tentar de novo.
-
-    - **O que a visualização mostra:** Múltiplas threads (processando múltiplos PIX) tentam escrever ao mesmo tempo. Apenas uma vence (luz verde). As outras falham (luz vermelha) e precisam entrar em um "loop de retry".
-    
-    - **A Otimização (Solução do Itaú com Fila em Memória):** O "loop de retry" pode ser caro e sobrecarregar a aplicação. A solução é organizar a bagunça *antes* de chegar no banco. A aplicação cria uma fila em memória (usando Kafka, SQS, ou um buffer local) para cada conta de destino. Isso garante que, para uma mesma conta, as operações PIX (débitos e créditos) sejam processadas uma de cada vez (Single Thread per Account), eliminando a chance de conflitos de versão e a necessidade de retentativas no banco de dados. O gargalo de concorrência é movido do banco para a aplicação, que é mais fácil e barato de escalar.
-    - **Trade-offs para PIX:**
-        - **Prós:** Extremamente escalável, pois não há bloqueios no banco, permitindo alta vazão de transações em contas diferentes.
-        - **Contras:** A complexidade do "loop de retry" é transferida para a aplicação. Sem uma fila de otimização, alta concorrência *na mesma conta* pode levar a muitas falhas e retentativas, aumentando a latência.
+    **Disrupção Matemática/Física (Latência vs. Carga):**
+    Sem uma fila, a performance se degrada com o aumento da concorrência. A probabilidade de uma transação falhar aumenta, levando a mais retentativas. Isso não só aumenta a latência média (cada retry é uma nova chamada de API), mas também o **custo**, pois cada tentativa de escrita consome WCUs (Write Capacity Units) no DynamoDB, mesmo que falhe.
     """)
 
+    # --- Gráfico de Escalabilidade Simulado ---
+    tps_range = np.arange(10, 1001, 20)
+    # Latência sem buffer: cresce exponencialmente com a concorrência devido a retries
+    latency_no_buffer = 10 + (tps_range / 100) ** 2 
+    # Latência com buffer: estável, pois não há retries no DB
+    latency_with_buffer = np.full_like(tps_range, 15)
+
+    chart_data = pd.DataFrame({
+        "TPS Concorrente na Mesma Conta": tps_range,
+        "Latência Média (ms) - Sem Fila de Buffer": latency_no_buffer,
+        "Latência Média (ms) - Com Fila de Buffer (SQS)": latency_with_buffer
+    }).set_index("TPS Concorrente na Mesma Conta")
+
+    st.line_chart(chart_data)
+
+    st.header("Deep Dive: Estrutura e Configuração no DynamoDB")
+    st.markdown("""
+    Para implementar esta solução, a tabela no DynamoDB seria estruturada assim:
+    - **Partition Key (PK):** `ID da Conta` (ex: `CONTA-12345`). Garante que todos os dados de uma conta fiquem juntos na mesma partição física, otimizando a busca.
+    - **Atributos:**
+        - `saldo`: (Number) O valor do saldo.
+        - `versao`: (Number) O número de versão, incrementado a cada atualização.
+        - `ultima_atualizacao`: (String) Timestamp da modificação.
+
+    **Como o DynamoDB Funciona:**
+    - **Threads:** O DynamoDB é um serviço gerenciado. As "threads" que mencionamos são na sua **aplicação** (ex: Lambdas, contêineres ECS) que rodam em paralelo. O DynamoDB é construído para lidar com milhões de requisições simultâneas.
+    - **Capacidade (RCU/WCU):** Você provisiona (ou usa o modo On-Demand) a capacidade de leitura e escrita. Uma `Hot Partition` (muitas requisições para a mesma PK, como no nosso cenário) pode esgotar a capacidade provisionada para aquela partição física, causando `ThrottlingException`. A fila de buffer na aplicação ajuda a mitigar isso, suavizando os picos de escrita.
+    - **Escrita Condicional (A Mágica):** A API `UpdateItem` do DynamoDB permite a `ConditionExpression`. Nossa chamada seria algo como: `UpdateItem(TableName='...', Key={'PK': 'CONTA-123'}, UpdateExpression='SET saldo = :novo_saldo, versao = versao + 1', ConditionExpression='versao = :versao_antiga', ...)`
+    """)
+    
 render_optimistic_locking_page()
