@@ -55,7 +55,7 @@ def desenhar_motor_postgres():
         if st.session_state.transacao_atual:
             req = st.session_state.transacao_atual
             e.node("processing", f"Processando (Taxa μ):\nID: ...{req['id'][-6:]}", fillcolor="lightblue")
-            dot.edge(reqs_para_mostrar[0]['id'], "processing", style="dashed", label="Dequeue")
+            dot.edge("fila_label", "processing", style="dashed", label="Dequeue")
             dot.edge("processing", "lock_status", label="SELECT FOR UPDATE")
         elif st.session_state.fila_requisicoes:
             dot.edge(reqs_para_mostrar[0]['id'], "lock_status", style="dashed", label="Tenta adquirir lock")
@@ -186,3 +186,4 @@ st.markdown("""
 - **Bernstein, P. A., & Newcomer, E. (2009).** *Principles of Transaction Processing*. Morgan Kaufmann. (Capítulos sobre Two-Phase Locking).
 - **Gray, J., & Reuter, A. (1992).** *Transaction Processing: Concepts and Techniques*. Morgan Kaufmann.
 - **Thompson, M. et al.** "LMAX Disruptor: High Performance Inter-Thread Messaging Library". *LMAX Exchange*. (Apresenta o conceito de design mecânico e o Single Writer Principle).
+""")

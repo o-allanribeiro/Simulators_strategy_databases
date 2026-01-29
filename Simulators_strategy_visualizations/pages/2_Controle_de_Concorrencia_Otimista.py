@@ -121,7 +121,7 @@ with col_sim:
 
 with col_log:
     st.markdown("#### Log de Operações")
-    log_html = "".join([f'<p style="margin: 0; font-family: monospace; font-size: 12px;">{evento}</p>' for evento in st.session_state.occ_log])
+    log_html = "".join([f'<p style="color: #333; margin: 0; font-family: monospace; font-size: 12px;">{evento}</p>' for evento in st.session_state.occ_log])
     st.markdown(f'<div style="height: 400px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; border-radius: 5px; background-color: #f8f9fa;">{log_html}</div>', unsafe_allow_html=True)
 
 
