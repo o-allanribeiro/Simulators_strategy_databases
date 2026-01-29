@@ -1,37 +1,38 @@
 import streamlit as st
 
 st.set_page_config(
-    page_title="Simulador de Estratégias de Dados",
-    page_icon="🔬",
+    page_title="Análise de Arquiteturas para Sistemas Financeiros",
+    page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.title("Simulador de Estratégias de Concorrência e Escalabilidade em Sistemas de Pagamento")
-st.caption("Versão 1.0 | Autor: Allan Ribeiro")
+st.title("Análise Comparativa de Arquiteturas para Sistemas de Pagamento de Alta Frequência")
+st.caption("Trabalho Apresentado como Requisito para Modelagem de Sistemas Distribuídos")
 st.divider()
 
 # --- Abstract ---
 st.header("Resumo")
 st.markdown("""
-Este trabalho apresenta um laboratório de experimentos computacionais interativos, desenvolvido para modelar e visualizar os trade-offs inerentes às arquiteturas de banco de dados em sistemas financeiros de alta performance. A crescente demanda por sistemas com **disponibilidade 24/7** e baixa latência, como o PIX, impõe desafios significativos de consistência e escalabilidade. Este simulador visa desmistificar tais desafios, aplicando conceitos fundamentais da Ciência da Computação — como o Teorema CAP, PACELC, Teoria das Filas e padrões de controle de concorrência — em cenários práticos e observáveis. Através de visualizações interativas, os usuários podem explorar o impacto de diferentes estratégias, como Bloqueio Pessimista e Sharding, no comportamento do sistema sob estresse.
+O presente trabalho explora, através de um laboratório de simulação computacional, os trade-offs críticos entre diferentes estratégias de controle de concorrência e escalabilidade em sistemas de pagamento de alta frequência (HFT). Com a ascensão de sistemas de pagamento instantâneo (SPIs), a demanda por baixa latência e alta disponibilidade colide com a necessidade de consistência estrita dos dados, um dilema governado por princípios como os teoremas CAP e PACELC. Este simulador modela cenários práticos, permitindo a análise visual e quantitativa do desempenho de arquiteturas monolíticas com **bloqueio pessimista** frente a arquiteturas distribuídas que utilizam **versionamento otimista**, **write sharding**, e **otimização de liquidez com teoria de grafos**. O objetivo é prover um framework didático para a tomada de decisão arquitetural, fundamentada em evidências empíricas geradas pelas simulações.
 """)
 st.divider()
 
 # --- Table of Contents ---
-st.header("Índice")
+st.header("Estrutura do Estudo")
 st.markdown("""
-- **[1. Introdução](#1-introducao)**
-- **[2. Fundamentação Teórica](#2-fundamentacao-teorica)**
-  - [2.1. O Trade-off Fundamental: Teorema CAP e PACELC](#2-1-o-trade-off-fundamental-teorema-cap-e-pacelc)
-  - [2.2. A Matemática da Espera: Teoria das Filas](#2-2-a-matematica-da-espera-teoria-das-filas)
-  - [2.3. A Solução para a "Manada Trovejante": Exponential Backoff com Jitter](#2-3-a-solucao-para-a-manada-trovejante-exponential-backoff-com-jitter)
-- **[3. Metodologia (Os Experimentos)](#3-metodologia-os-experimentos)**
-  - [3.1. Experimento A: Bloqueio Pessimista](#3-1-experimento-a-bloqueio-pessimista)
-  - [3.2. Experimento B: Escalabilidade de Escrita com Sharding](#3-2-experimento-b-escalabilidade-de-escrita-com-sharding)
-  - [3.3. Experimento C: Padrão de Write Sharding na Aplicação](#3-3-experimento-c-padrao-de-write-sharding-na-aplicacao)
-- **[4. Análise Comparativa](#4-analise-comparativa)**
-- **[5. Referências](#5-referencias)**
+- **[1. Introdução](#1-introducao)**: Definição do problema e a questão de pesquisa.
+- **[2. Fundamentação Teórica](#2-fundamentacao-teorica)**: Os pilares científicos que governam os sistemas distribuídos.
+  - [2.1. O Dilema da Distribuição: Teoremas CAP e PACELC](#2-1-o-dilema-da-distribuicao-teoremas-cap-e-pacelc)
+  - [2.2. A Física da Performance: Teoria das Filas e Lei de Little](#2-2-a-fisica-da-performance-teoria-das-filas-e-lei-de-little)
+- **[3. Metodologia: Estudo de Casos Simulados](#3-metodologia-estudo-de-casos-simulados)**: Descrição dos experimentos.
+  - [3.1. Caso 1: Controle de Concorrência Pessimista](#3-1-caso-1-controle-de-concorrencia-pessimista)
+  - [3.2. Caso 2: Controle de Concorrência Otimista](#3-2-caso-2-controle-de-concorrencia-otimista)
+  - [3.3. Caso 3: Escalabilidade com Write Sharding](#3-3-caso-3-escalabilidade-com-write-sharding)
+  - [3.4. Caso 4: Otimização de Liquidez com Grafos](#3-4-caso-4-otimizacao-de-liquidez-com-grafos)
+  - [3.5. Caso 5: Arquitetura de Referência Agregadora](#3-5-caso-5-arquitetura-de-referencia-agregadora)
+- **[4. Análise Comparativa e Conclusões](#4-analise-comparativa-e-conclusoes)**
+- **[5. Referências Bibliográficas](#5-referencias-bibliograficas)**
 """)
 st.divider()
 
@@ -39,83 +40,55 @@ st.divider()
 # --- Content ---
 st.header("1. Introdução")
 st.markdown("""
-A digitalização dos serviços financeiros e o advento de sistemas de pagamento instantâneo (SPIs), como o PIX no Brasil, revolucionaram as expectativas dos consumidores e os requisitos técnicos para as instituições financeiras. A necessidade de operar com **disponibilidade contínua (24/7)**, processando um volume massivo de transações com latência na casa dos milissegundos, colide diretamente com a necessidade de **consistência** absoluta dos dados, especialmente em um livro-razão (ledger) financeiro.
+A proliferação de sistemas de pagamento instantâneo (SPIs) impôs um novo paradigma para a engenharia de software no setor financeiro. A questão deixou de ser apenas *se* uma transação pode ser processada de forma segura, mas *se* milhões de transações concorrentes podem ser processadas de forma segura, com latência de milissegundos e disponibilidade contínua (24/7). Este desafio expõe uma tensão fundamental entre consistência, disponibilidade e latência.
 
-Este simulador foi criado para responder a uma pergunta central: **Quais são os trade-offs concretos ao escolher uma arquitetura de banco de dados para um sistema de pagamentos moderno?** O objetivo é fornecer uma ferramenta educacional e de análise que permita a visualização do comportamento de diferentes modelos de consistência e escalabilidade sob estresse, conectando a teoria abstrata à prática observável.
+A questão central que este estudo busca responder é: **Quais são os trade-offs quantificáveis entre os diferentes padrões arquiteturais para a gestão de um livro-razão (ledger) distribuído sob alta carga?** Para tal, desenvolveu-se uma suíte de simulações interativas que modelam o comportamento de diferentes estratégias, desde o bloqueio pessimista tradicional até padrões de sharding e otimização de liquidez.
 """, unsafe_allow_html=True)
 
 
 st.header("2. Fundamentação Teórica")
 st.markdown("""
-As simulações são governadas por princípios fundamentais da ciência da computação que ditam os limites e as possibilidades de sistemas distribuídos.
+As simulações apresentadas são a manifestação prática de teorias consolidadas da Ciência da Computação.
 """, unsafe_allow_html=True)
 
-st.subheader("2.1. O Trade-off Fundamental: Teorema CAP e PACELC")
+st.subheader("2.1. O Dilema da Distribuição: Teoremas CAP e PACELC")
 st.markdown("""
-O **Teorema CAP**, ou Teorema de Brewer, postula que um sistema distribuído pode garantir, no máximo, duas das três seguintes propriedades simultaneamente: **C**onsistência, **A**lta Disponibilidade (Availability) e Tolerância a **P**artições de rede. Como partições de rede são uma realidade inevitável, a escolha real é quase sempre entre consistência e disponibilidade.
+O **Teorema CAP (Brewer, 2000)** estabelece que um sistema distribuído pode, no máximo, satisfazer duas de três garantias: Consistência (todos os nós veem os mesmos dados ao mesmo tempo), Disponibilidade (todas as requisições recebem uma resposta) e Tolerância a Partições de rede. Dado que partições de rede são uma certeza em sistemas de larga escala, a escolha de projeto recai sobre sacrificar a consistência ou a disponibilidade durante uma falha.
 
-O **Teorema PACELC** estende essa ideia, afirmando que, na presença de uma **P**artição, um sistema deve escolher entre **A**disponibilidade e **C**onsistência; **S**enão (**E**lse), em operação normal, ele deve escolher entre **L**atência e **C**onsistência. Isso é particularmente relevante para sistemas financeiros, onde mesmo sem falhas de rede, a busca por consistência forte pode aumentar a latência das operações.
-""", unsafe_allow_html=True)
-
-
-st.subheader("2.2. A Matemática da Espera: Teoria das Filas")
-st.markdown("""
-A performance de sistemas transacionais pode ser modelada pela **Teoria das Filas**. A **Lei de Little** ($L = \lambda W$) descreve a relação entre o número de itens em um sistema ($L$, o tamanho da fila), a taxa de chegada desses itens ($\lambda$, as transações por segundo) e o tempo de espera ($W$, a latência). Em cenários de bloqueio pessimista, onde as transações são serializadas, se a taxa de chegada ($\lambda$) excede a capacidade de processamento do sistema ($\mu$), a fila ($L$) e, consequentemente, a latência ($W$), tendem ao infinito.
-> Veja a demonstração deste efeito na simulação do **[Modelo Pessimista](1_A_Pessimistic_Locking)**.
+O **Teorema PACELC (Abadi, 2012)** refina essa noção para o mundo real, argumentando que, mesmo na ausência de partições (**E**lse), existe um trade-off entre **L**atência e **C**onsistência. Para sistemas financeiros, esta segunda parte do teorema é crucial: a busca por consistência forte (e.g., através de protocolos de consenso ou locks) inerentemente introduz latência.
 """, unsafe_allow_html=True)
 
 
-st.subheader("2.3. A Solução para a 'Manada Trovejante': Exponential Backoff com Jitter")
+st.subheader("2.2. A Física da Performance: Teoria das Filas e Lei de Little")
 st.markdown("""
-Em sistemas otimistas que podem rejeitar transações (como em "Hot Partitions" no DynamoDB), múltiplas falhas podem levar a múltiplas tentativas simultâneas, um fenômeno conhecido como "manada trovejante" (*thundering herd*), que sobrecarrega o sistema ainda mais. A solução padrão é o **Exponential Backoff com Jitter**. Em vez de tentar novamente imediatamente, o cliente espera por um tempo que aumenta exponencialmente a cada falha. O **Jitter** (uma pequena variação aleatória) é adicionado a esse tempo de espera para evitar que todos os clientes tentem novamente exatamente no mesmo instante.
-> Este conceito é fundamental para a resiliência do cenário de **[Sharding no DynamoDB](2_B_DynamoDB_Sharding)**.
+A performance de sistemas transacionais pode ser modelada pela **Teoria das Filas**. A **Lei de Little (1961)**, expressa como $L = \lambda W$, é particularmente poderosa. Ela afirma que o número médio de itens em um sistema ($L$, o "tamanho da fila") é igual à taxa média de chegada desses itens ($\lambda$, transações por segundo) multiplicada pelo tempo médio de permanência de um item no sistema ($W$, a latência).
+
+Em um modelo de **bloqueio pessimista**, onde o acesso a um recurso é serializado, o sistema se comporta como uma fila M/D/1. Se a taxa de chegada ($\lambda$) se aproxima da taxa de serviço ($\mu$), a latência ($W$) e, consequentemente, o tamanho da fila ($L$), crescem de forma não-linear, tendendo ao infinito.
+> A demonstração deste colapso de performance é o foco do **[Caso 1: Controle de Concorrência Pessimista](1_Controle_de_Concorr_ncia_Pessimista)**.
 """, unsafe_allow_html=True)
 st.divider()
 
 
-st.header("3. Metodologia (Os Experimentos)")
+st.header("3. Metodologia: Estudo de Casos Simulados")
 st.markdown("""
-Navegue pelas simulações no menu à esquerda para explorar cada um dos seguintes experimentos.
-""", unsafe_allow_html=True)
-
-st.subheader("3.1. Experimento A: Bloqueio Pessimista")
-st.markdown("""
-- **Tecnologia Modelo:** Aurora/PostgreSQL
-- **Estratégia:** Uso de `SELECT FOR UPDATE` para serializar o acesso a uma conta.
-- **Hipótese:** A consistência forte é garantida ao custo de um gargalo de performance.
-- **Link:** **[Ir para a simulação](1_A_Pessimistic_Locking)**
-""", unsafe_allow_html=True)
-
-st.subheader("3.2. Experimento B: Escalabilidade de Escrita com Sharding")
-st.markdown("""
-- **Tecnologia Modelo:** Amazon DynamoDB
-- **Estratégia:** Uso de *Write Sharding* para distribuir escritas em múltiplas partições lógicas.
-- **Hipótese:** A capacidade de escrita pode ser escalada linearmente, mas a um custo maior de complexidade para a leitura do saldo consolidado.
-- **Link:** **[Ir para a simulação](2_B_DynamoDB_Sharding)**
-""", unsafe_allow_html=True)
-
-st.subheader("3.3. Experimento C: Padrão de Write Sharding na Aplicação")
-st.markdown("""
-- **Tecnologia Modelo:** Cluster de Bancos Relacionais (ex: PostgreSQL, CockroachDB)
-- **Estratégia:** A lógica de sharding é movida para a aplicação, que decide para qual banco de dados rotear cada escrita.
-- **Hipótese:** Permite escalar bancos de dados tradicionais, mas aumenta significativamente a complexidade da aplicação e de operações cross-shard.
-- **Link:** **[Ir para a simulação](3_A_Write_Sharding_Pattern)**
+Navegue pelas páginas no menu à esquerda para interagir com cada estudo de caso. A metodologia adotada foi a de simulação de eventos discretos para modelar o comportamento de cada arquitetura sob carga variável.
 """, unsafe_allow_html=True)
 st.divider()
 
 
-st.header("4. Análise Comparativa")
+st.header("4. Análise Comparativa e Conclusões")
 st.markdown("""
-A página de **Matriz de Decisão** oferece uma análise comparativa dos trade-offs de cada abordagem, consolidando os aprendizados de cada simulação em um guia de referência rápido.
-- **Link:** **[Ir para a Matriz de Decisão](5_Matriz_de_Decisao)**
+A página de **Matriz de Decisão Estratégica** consolida os resultados observados, oferecendo uma análise comparativa dos trade-offs de cada arquitetura em eixos como taxa de transferência (TPS), latência, complexidade de implementação e custo operacional.
+- **Link:** **[Ir para a Matriz de Decisão](6_Matriz_de_Decisao_Estrategica)**
 """, unsafe_allow_html=True)
 st.divider()
 
-st.header("5. Referências")
+st.header("5. Referências Bibliográficas")
 st.markdown("""
-1.  **Brewer, E. (2000).** "Towards Robust Distributed Systems". *Symposium on Principles of Distributed Computing (PODC)*.
-2.  **Gilbert, S., & Lynch, N. (2002).** "Brewer's conjecture and the feasibility of consistent, available, partition-tolerant web services". *ACM SIGACT News*.
-3.  **Abadi, D. J. (2012).** "Consistency Tradeoffs in Modern Distributed Database System Design". *IEEE Computer*.
-4.  **Brooker, M. (2015).** "Exponential Backoff and Jitter". *AWS Architecture Blog*.
+1.  **Abadi, D. J. (2012).** "Consistency Tradeoffs in Modern Distributed Database System Design". *IEEE Computer*.
+2.  **Brewer, E. (2000).** "Towards Robust Distributed Systems". *Symposium on Principles of Distributed Computing (PODC)*.
+3.  **Gilbert, S., & Lynch, N. (2002).** "Brewer's conjecture and the feasibility of consistent, available, partition-tolerant web services". *ACM SIGACT News*.
+4.  **Kleppmann, M. (2017).** *Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems*. O'Reilly Media.
 5.  **Little, J. D. C. (1961).** "A Proof for the Queuing Formula: L = λW". *Operations Research*.
+6.  **Bernstein, P. A., & Newcomer, E. (2009).** *Principles of Transaction Processing*. Morgan Kaufmann.
 """, unsafe_allow_html=True)
