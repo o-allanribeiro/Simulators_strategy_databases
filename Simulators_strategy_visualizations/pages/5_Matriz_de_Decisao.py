@@ -1,142 +1,46 @@
 import streamlit as st
-import graphviz
 
-st.set_page_config(layout="wide", page_title="Matriz de Decisão")
+st.set_page_config(layout="wide", page_title="Análise Comparativa e Matriz de Decisão")
 
-# --- Funções de Desenho dos Diagramas de Trade-off ---
+st.title("Análise Comparativa e Matriz de Decisão Estratégica")
+st.markdown("---")
+st.markdown("""
+### Resumo
+Esta seção final sintetiza os aprendizados dos estudos de caso anteriores em uma matriz de decisão unificada. O objetivo é prover um framework comparativo para a avaliação dos trade-offs entre as diferentes estratégias de concorrência, escalabilidade e otimização. Não existe uma "bala de prata"; a escolha da arquitetura correta é um exercício de alinhar as características de cada padrão com os requisitos específicos do negócio.
+""")
+st.markdown("---")
 
-def draw_aurora_tradeoff():
-    dot = graphviz.Digraph('AuroraTradeoff', graph_attr={'rankdir': 'TB', 'splines': 'ortho'})
-    dot.attr('node', shape='box', style='rounded')
-    dot.node('req1', 'Req 1', shape='ellipse')
-    dot.node('req2', 'Req 2', shape='ellipse')
-    dot.node('req3', 'Req 3', shape='ellipse')
-    dot.node('lock', 'LOCK na Conta\n(SELECT FOR UPDATE)', shape='octagon', style='filled', fillcolor='salmon')
-    dot.edge('req1', 'lock', label='Processando')
-    dot.edge('req2', 'lock', label='Esperando na fila')
-    dot.edge('req3', 'lock', label='Esperando na fila')
-    dot.attr(label='Fluxo Aurora/PostgreSQL: A Fila Única', labelloc="t", fontsize="14")
-    return dot
+st.header("Matriz Comparativa de Estratégias Arquiteturais")
 
-def draw_dynamo_tradeoff():
-    dot = graphviz.Digraph('DynamoTradeoff', graph_attr={'rankdir': 'TB'})
-    dot.attr('node', shape='box', style='rounded,filled')
-
-    with dot.subgraph(name='cluster_write') as c:
-        c.attr(label='Escrita (Write Sharding)', style='dashed', color='green')
-        c.node('write', 'Nova Transação', shape='ellipse', fillcolor='white')
-        c.node('shard1', 'Shard 1', fillcolor='lightgreen')
-        c.node('shard2', 'Shard 2', fillcolor='lightgreen')
-        c.node('shard3', 'Shard 3', fillcolor='lightgreen')
-        c.edge('write', 'shard2', label=' hash(id) % 3 ')
-
-    with dot.subgraph(name='cluster_read') as c:
-        c.attr(label='Leitura (Scatter-Gather)', style='dashed', color='red')
-        c.node('read', 'Calcular Saldo Total', shape='ellipse', fillcolor='white')
-        c.edge('read', 'shard1', label='Lê')
-        c.edge('read', 'shard2', label='Lê')
-        c.edge('read', 'shard3', label='Lê')
-    
-    dot.attr(label='Fluxo DynamoDB com Sharding: Escrita Fácil, Leitura Cara', labelloc="t", fontsize="14")
-    return dot
-
-def draw_cockroach_tradeoff():
-    dot = graphviz.Digraph('CockroachTradeoff')
-    dot.attr('node', shape='box', style='rounded')
-    
-    with dot.subgraph(name='cluster_sp') as sp:
-        sp.attr(label='Data Center: São Paulo')
-        sp.node('sp_node', 'Nó 1 (Leader)', style='filled', fillcolor='lightblue')
-
-    with dot.subgraph(name='cluster_us') as us:
-        us.attr(label='Data Center: Virginia (EUA)')
-        us.node('us_node', 'Nó 2')
-
-    with dot.subgraph(name='cluster_eu') as eu:
-        eu.attr(label='Data Center: Irlanda (EU)')
-        eu.node('eu_node', 'Nó 3')
-
-    dot.edge('sp_node', 'us_node', label=' Latência de Rede\n(Consenso Raft)')
-    dot.edge('us_node', 'eu_node', label=' Latência de Rede\n(Consenso Raft)')
-    dot.edge('eu_node', 'sp_node', label=' Latência de Rede\n(Consenso Raft)')
-    dot.attr(label='Fluxo CockroachDB: Consenso Distribuído', labelloc="t", fontsize="14")
-    return dot
+st.markdown("""
+| Estratégia | Cenário Ideal de Uso | Taxa de Transferência (TPS) | Latência (Alta Carga) | Complexidade de Implementação | Principal Vantagem | Principal Desvantagem |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Controle Pessimista** | Sistemas legados; Baixa concorrência no mesmo recurso; Transações complexas que tocam muitas tabelas. | **Baixa.** Limitada pela transação mais lenta. | **Muito Alta.** A fila cresce de forma não-linear, levando ao colapso do sistema. | **Baixa.** O padrão de `LOCK` é simples e bem estabelecido. | **Garantia de consistência forte** e simplicidade de código. | **Gargalo de performance.** Não escala para "contas quentes". |
+| **2. Controle Otimista** | Sistemas distribuídos; Baixa a média probabilidade de conflito; Leituras frequentes com escritas menos frequentes. | **Média a Alta.** O throughput é alto se não houver conflitos. | **Baixa a Média.** A latência é baixa, mas falhas por conflito exigem retentativas na aplicação. | **Média.** Requer versionamento dos dados e uma lógica de retentativa no lado do cliente/aplicação. | **Alto grau de concorrência.** Leitores não bloqueiam escritores. | A aplicação **deve tratar os conflitos** e o "lost update" se não houver CAS. |
+| **3. Write Sharding** | Contas "baleia" com altíssimo volume de escritas; Sistemas que precisam de escalabilidade horizontal massiva. | **Muito Alta.** A capacidade de escrita escala linearmente com o número de shards. | **Baixa.** As escritas são distribuídas e independentes. | **Alta.** Exige uma lógica de roteamento (na app ou no BD) e torna as leituras agregadas complexas. | **Escalabilidade de escrita "infinita"** para um único recurso lógico. | **Leitura agregada cara** (scatter-gather) e complexidade em transações cross-shard. |
+| **4. Otimização com Grafos** | Sistemas de compensação interbancária (RTGS); Otimização de processos de negócio com dependências cíclicas. | N/A (Não é uma estratégia de TPS). | N/A (Opera em lote sobre obrigações já consolidadas). | **Alta.** Requer conhecimento de teoria dos grafos e integração com o sistema de pagamentos. | **Redução drástica da necessidade de liquidez** no sistema. | Não resolve o problema de performance da transação individual. |
+""")
+st.markdown("---")
 
 
-# --- Dados dos Bancos (Estrutura Corrigida para URL de Markdown) ---
-db_data = {
-    "Aurora PostgreSQL": {
-        "metaphora": "Fila Única (Lock Pessimista)",
-        "motivacao": "Bancos tradicionais, baixo/médio TPS por conta, migração 'as-is' de legado.",
-        "garantia": "ACID completo, SQL padrão.",
-        "custo": "Sofre com Hot Partitions (a fila trava o sistema).",
-        "pagina_url": "1_A_Pessimistic_Locking",
-        "nome_simulacao": "Modelo Pessimista",
-        "diagrama": draw_aurora_tradeoff
-    },
-    "DynamoDB + Sharding": {
-        "metaphora": "Múltiplos Cofres (Scatter-Gather)",
-        "motivacao": "Contas 'Baleia' (Ex: Conta concentradora de marketplaces) com altíssima ingestão de créditos.",
-        "garantia": "Escalabilidade de escrita 'infinita'.",
-        "custo": "Leitura do saldo total é complexa e cara (Scatter-Gather). Débito em tempo real é um desafio.",
-        "pagina_url": "2_B_DynamoDB_Sharding",
-        "nome_simulacao": "Escalando com Sharding",
-        "diagrama": draw_dynamo_tradeoff
-    },
-    "CockroachDB": {
-        "metaphora": "Votação Global (Consenso Raft)",
-        "motivacao": "Banco Global, Multi-Região, necessidade de Strong Consistency sem perder a sintaxe SQL.",
-        "garantia": "Sobrevive à queda de um Data Center. Garante que o saldo nunca erre, mesmo com latência de rede.",
-        "custo": "Latência de escrita maior devido à comunicação entre nós (o preço da consistência global).",
-        "pagina_url": None,
-        "nome_simulacao": "Consenso Distribuído",
-        "diagrama": draw_cockroach_tradeoff
-    }
-}
+st.header("Como Escolher a Estratégia Certa: Um Framework de Decisão")
+st.markdown("""
+A matriz acima serve como um guia, mas a decisão final deve ser guiada por uma análise do seu problema de negócio específico. Faça as seguintes perguntas:
 
-st.title("Matriz de Decisão Interativa")
-st.markdown("Selecione uma tecnologia de banco de dados para ver uma análise de sua abordagem e os trade-offs envolvidos.")
+#### 1. Qual é a natureza do seu gargalo?
+-   **Contenção em um único registro?** Se o problema é uma "conta quente" que recebe milhares de escritas (e.g., conta de um marketplace), o **Write Sharding** (Estratégia 3) é a solução mais indicada para escalar a escrita.
+-   **Transações complexas e longas bloqueando umas às outras?** Se o problema são locks em múltiplas tabelas que geram longas filas, considere migrar para **Controle Otimista** (Estratégia 2) para permitir maior concorrência.
+-   **O sistema como um todo está lento?** Se o gargalo é o hardware de um servidor monolítico, o sharding (particionamento de todo o banco, não apenas de uma conta) pode ser a solução.
 
-option = st.selectbox(
-    "Selecione a Tecnologia de Banco de Dados:",
-    options=list(db_data.keys())
-)
+#### 2. Qual a complexidade que sua equipe pode gerenciar?
+-   **Equipe pequena ou projeto novo?** Comece com a solução mais simples que funciona. Um banco de dados relacional com **Controle Pessimista** (Estratégia 1) é robusto e fácil de entender. Otimize apenas quando o gargalo se tornar um problema real.
+-   **Equipe experiente com cultura DevOps?** Estratégias como **Sharding na Aplicação** ou a implementação de uma arquitetura baseada em eventos (como o Padrão Agregador) oferecem performance máxima, mas exigem um investimento significativo em automação, monitoramento e complexidade de código.
 
-st.divider()
+#### 3. O problema é técnico (TPS) ou de negócio (eficiência de capital)?
+-   Se o seu mandato é "garantir que a API de PIX nunca caia e aguente 10.000 TPS", seu foco deve estar nas Estratégias 1, 2 e 3.
+-   Se o seu mandato é "reduzir a quantidade de dinheiro que o banco precisa manter em caixa para liquidar as operações do dia", seu foco é a **Otimização com Grafos** (Estratégia 4), que opera em um nível de abstração acima do processamento de transações individuais.
 
-if option:
-    data = db_data[option]
-    st.header(f"Análise: {option}")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Metáfora Visual")
-        st.info(data["metaphora"])
-        
-        st.subheader("Quando Usar (Motivação)")
-        st.write(data["motivacao"])
-        
-        st.subheader("Garantias")
-        st.success(f"✔️ {data['garantia']}")
-
-        st.subheader("Custo / Trade-off")
-        st.error(f"❌ {data['custo']}")
-    
-    with col2:
-        st.subheader("Diagrama do Fluxo de Trade-off")
-        st.graphviz_chart(data["diagrama"]())
-
-    st.divider()
-
-    if data["pagina_url"]:
-        st.subheader("Cenário de Simulação Relacionado")
-        # CORREÇÃO: Usando st.markdown para criar o link como alternativa ao st.page_link
-        link_markdown = f"""
-        <a href="{data['pagina_url']}" target="_self" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-decoration: none; border-radius: 0.25rem; font-weight: 600;">
-            🔬 Ir para a simulação do <strong>{data['nome_simulacao']}</strong>
-        </a>
-        """
-        st.markdown(link_markdown, unsafe_allow_html=True)
-    else:
-        st.info(f"Ainda não há uma simulação interativa específica para o cenário de **{data['nome_simulacao']}**.")
+#### Conclusão Final
+A arquitetura ideal, como vimos no Estudo de Caso 5, muitas vezes **combina múltiplas estratégias**. Usa-se o Padrão Agregador com Sharding para resolver o problema de TPS (nível micro) e, em seguida, alimenta as obrigações líquidas resultantes em um sistema de otimização de grafos para resolver o problema de liquidez (nível macro). Comece simples, identifique gargalos com dados e evolua a arquitetura de forma incremental e informada.
+""")
+st.markdown("---")

@@ -91,7 +91,7 @@ def processar_proximo():
         saldo_disponivel = st.session_state.pockets['total'] - st.session_state.pockets['bloqueado']
         if saldo_disponivel >= valor:
             st.session_state.pockets['bloqueado'] += valor
-            log(f"Reserva de R$ {valor:.2f} efetuada (BEGIN TX)."), "INFO")
+            log(f"Reserva de R$ {valor:.2f} efetuada (BEGIN TX).", "INFO")
         else:
             log(f"FALHA: Saldo insuficiente (R$ {saldo_disponivel:.2f}) para R$ {valor:.2f}. ROLLBACK.", "ERROR")
             st.session_state.transacao_atual = None 
@@ -156,7 +156,7 @@ with col_log:
 
 st.markdown("---")
 st.header("Análise dos Resultados")
-st.markdown(f"""
+st.markdown("""
 **Interpretação da Simulação:**
 - **Taxa de Chegada (λ):** Cada clique no botão "Gerar Chegada" simula uma nova transação chegando ao sistema.
 - **Taxa de Serviço (μ):** O clique em "Executar Ciclo" representa um único ciclo de processamento do banco de dados (o tempo para executar a lógica de negócio e o COMMIT).
@@ -165,17 +165,24 @@ st.markdown(f"""
 A simulação demonstra um princípio fundamental da **Teoria das Filas**. O sistema se comporta como uma fila do tipo **M/D/1** (Chegadas de Markov, Tempo de Serviço Determinístico, 1 Servidor). O "servidor" é o lock da conta, que só pode atender uma transação por vez.
 
 Ao aumentar a frequência de chegadas (clicar em "Gerar Chegada" mais rápido do que em "Executar Ciclo"), a **Fila de Requisições (Lq)** começa a crescer. Este é o efeito previsto pela **Lei de Little ($L = \lambda W$)**:
-1.  Quando a taxa de chegada (λ) é significativamente menor que a taxa de serviço (μ), a fila permanece vazia ou pequena.
-2.  À medida que λ se aproxima de μ, o tempo de espera no sistema (W) para cada transação aumenta drasticamente. Como L = λ W, o tamanho da fila (L) também cresce de forma não-linear.
-3.  Se λ ≥ μ, a fila teoricamente cresce ao infinito, e o sistema colapsa em termos de latência.
+1.  Quando a taxa de chegada ($\lambda$) é significativamente menor que a taxa de serviço ($\mu$), a fila permanece vazia ou pequena.
+2.  À medida que $\lambda$ se aproxima de $\mu$, o tempo de espera no sistema ($W$) para cada transação aumenta drasticamente. Como $L = \lambda W$, o tamanho da fila ($L$) também cresce de forma não-linear.
+3.  Se $\lambda \ge \mu$, a fila teoricamente cresce ao infinito, e o sistema colapsa em termos de latência.
 
 **Conclusão:** O bloqueio pessimista garante consistência de forma simples e robusta, mas ao custo de criar um gargalo (um único ponto de serialização) que impede a escalabilidade horizontal para um recurso de alta contenção. É uma estratégia eficaz quando o volume de transações concorrentes para o mesmo recurso é baixo.
-""", unsafe_allow_html=True)
+""")
+
+st.subheader("Alternativas ao Bloqueio: Arquiteturas Lock-Free (LMAX Disruptor)")
+st.markdown("""
+A principal conclusão do modelo pessimista é que **locks são gargalos**. Em sistemas de altíssima frequência (HFT), a contenção por locks é inaceitável. A arquitetura **LMAX Disruptor**, desenvolvida para uma bolsa de valores de Londres, popularizou o **"Single Writer Principle"** (Princípio do Escritor Único).
+A ideia é redesenhar a arquitetura para que, por design, apenas **uma única thread** tenha permissão para modificar um recurso crítico. Se não há múltiplos escritores, não há concorrência pela escrita, e, portanto, **não há necessidade de locks**.
+Isto é frequentemente alcançado com filas em memória e particionamento de dados, onde cada partição é "possuída" por uma thread. Este conceito é a base para o "Padrão Agregador" que veremos mais adiante, onde o Kafka garante que todas as transações de uma conta sejam processadas por um único consumidor.
+""")
+
 
 st.markdown("---")
 st.subheader("Referências e Leitura Adicional")
 st.markdown("""
 - **Bernstein, P. A., & Newcomer, E. (2009).** *Principles of Transaction Processing*. Morgan Kaufmann. (Capítulos sobre Two-Phase Locking).
 - **Gray, J., & Reuter, A. (1992).** *Transaction Processing: Concepts and Techniques*. Morgan Kaufmann.
-- **Hellerstein, J. M., Stonebraker, M., & Hamilton, J. (2007).** "Concurrency Control" in *Architecture of a Database System*. Foundations and Trends® in Databases.
-""")
+- **Thompson, M. et al.** "LMAX Disruptor: High Performance Inter-Thread Messaging Library". *LMAX Exchange*. (Apresenta o conceito de design mecânico e o Single Writer Principle).
