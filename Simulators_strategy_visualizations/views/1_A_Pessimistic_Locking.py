@@ -21,12 +21,33 @@ def inicializar_estado():
     if 'pockets' not in st.session_state:
         st.session_state.pockets = {'total': 1000.00, 'bloqueado': 0.00}
 
+def resetar_simulacao():
+    st.session_state.fila_requisicoes = []
+    st.session_state.transacao_atual = None
+    st.session_state.transacoes_comitadas = []
+    st.session_state.log_eventos = ["Simulação reiniciada."]
+    st.session_state.lock_adquirido = False
+    st.session_state.pockets = {'total': 1000.00, 'bloqueado': 0.00}
+
 def adicionar_requisicao():
     valor = round(random.uniform(10.0, 250.0), 2)
-    req_id = f"pix_{{int(time.time())}}_{random.randint(100,999)}"
+    req_id = f"pix_{int(time.time())}_{random.randint(100,999)}"
     nova_req = {'id': req_id, 'valor': valor, 'status': 'pendente'}
     st.session_state.fila_requisicoes.append(nova_req)
     log(f"Nova requisição (λ) de R$ {valor:.2f} chegou ao sistema.", "INFO")
+
+def adicionar_rajada(quantidade=10):
+    for _ in range(quantidade):
+        adicionar_requisicao()
+    log(f"Rajada de {quantidade} transações geradas de uma vez.", "WARN")
+
+def adicionar_transacao_alto_valor():
+    saldo_disponivel = st.session_state.pockets['total'] - st.session_state.pockets['bloqueado']
+    valor = round(saldo_disponivel + 100, 2) if saldo_disponivel > 0 else 999.99
+    req_id = f"pix_{int(time.time())}_{random.randint(100,999)}"
+    nova_req = {'id': req_id, 'valor': valor, 'status': 'pendente'}
+    st.session_state.fila_requisicoes.append(nova_req)
+    log(f"Transação de alto valor (R$ {valor:.2f}) adicionada — excede o saldo disponível de propósito.", "WARN")
 
 def log(mensagem, tipo="DEBUG"):
     agora = datetime.now().strftime("%H:%M:%S")
@@ -101,7 +122,6 @@ def processar_proximo():
         log("Fila vazia.", "INFO")
 
 # --- Início da Renderização da Página ---
-st.set_page_config(layout="wide", page_title="Estudo de Caso 1: Controle de Concorrência Pessimista")
 inicializar_estado()
 
 st.title("Estudo de Caso 1: Controle de Concorrência Pessimista")
@@ -111,6 +131,13 @@ st.markdown(f"""
 ### Resumo
 Este experimento modela o comportamento de um sistema de banco de dados relacional (como PostgreSQL ou Oracle) que emprega uma estratégia de **Controle de Concorrência Pessimista (PCC)**. Sob este paradigma, assume-se que conflitos de transação são prováveis. Portanto, para garantir a consistência, o sistema bloqueia preventivamente os recursos de dados no início de uma transação (`SELECT FOR UPDATE`), forçando outras transações que requerem o mesmo recurso a esperar. Esta simulação visualiza o efeito de tal serialização sob uma carga de trabalho concorrente.
 """)
+
+st.info(
+    "**Como funciona:** clique em \"Nova transação chegou\" para simular um cliente enviando um Pix para a fila. "
+    "Clique em \"Processar 1 transação\" para o banco atender a fila, uma de cada vez — ele precisa travar "
+    "(\"lock\") o recurso antes de processar e só libera no fim. Gere transações mais rápido do que processa e "
+    "veja a fila crescer."
+)
 st.markdown("---")
 
 
@@ -118,14 +145,36 @@ col_controles, col_viz, col_log = st.columns([1, 2, 1])
 
 # --- Coluna de Controles e Saldos ---
 with col_controles:
-    st.header("Parâmetros da Simulação")
-    if st.button("Gerar Chegada de Transação (λ)"):
+    st.header("Controles")
+    if st.button(
+        "Nova transação chegou",
+        help="Na Teoria das Filas, isso representa a taxa de chegada (λ): uma nova requisição entra no sistema.",
+    ):
         adicionar_requisicao()
 
-    proximo_label = "Executar Ciclo de Processamento (μ)"
-    if st.button(proximo_label, disabled=not st.session_state.fila_requisicoes and not st.session_state.lock_adquirido):
+    if st.button(
+        "Processar 1 transação",
+        help="Representa um ciclo de serviço (μ): o banco processa a transação do início da fila e libera o lock ao final.",
+        disabled=not st.session_state.fila_requisicoes and not st.session_state.lock_adquirido,
+    ):
         processar_proximo()
-    
+
+    st.markdown("**Cenários prontos:**")
+    if st.button(
+        "Simular rajada (10 chegadas de uma vez)",
+        help="Adiciona 10 transações na fila de uma só vez, sem precisar clicar 10 vezes — útil para ver a fila crescer rápido.",
+    ):
+        adicionar_rajada(10)
+
+    if st.button(
+        "Forçar transação de alto valor (vai falhar)",
+        help="Adiciona uma transação maior que o saldo disponível atual, garantindo que o próximo processamento resulte em ROLLBACK por saldo insuficiente.",
+    ):
+        adicionar_transacao_alto_valor()
+
+    if st.button("Reiniciar simulação", help="Limpa a fila, o log e o saldo — útil para começar cada cenário do zero."):
+        resetar_simulacao()
+
     st.header("Estado do Recurso (Conta-123)")
     saldo_disponivel = st.session_state.pockets['total'] - st.session_state.pockets['bloqueado']
     st.markdown(f"""
@@ -138,8 +187,12 @@ with col_controles:
 
 # --- Coluna de Visualização ---
 with col_viz:
-    st.header("Modelo Visual do Sistema (Fila M/D/1)")
+    st.header("O que está acontecendo agora")
     st.graphviz_chart(desenhar_motor_postgres())
+    st.caption(
+        "Amarelo: transações esperando na fila · Verde: recurso livre · Vermelho: recurso travado (em uso) · "
+        "Verde claro: já processado e registrado no ledger."
+    )
 
 # --- Coluna de Log ---
 with col_log:
@@ -155,34 +208,58 @@ with col_log:
     log_container.markdown(f'<div style="height: 600px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; border-radius: 5px; background-color: #f8f9fa;">{log_html}</div>', unsafe_allow_html=True)
 
 st.markdown("---")
-st.header("Análise dos Resultados")
+
+st.subheader("Cenários para Explorar")
 st.markdown("""
+Dica: clique em "Reiniciar simulação" antes de cada cenário abaixo para começar do zero.
+
+**Cenário 1 — Fluxo Normal (sem fila):**
+1. Clique em "Nova transação chegou".
+2. Clique em "Processar 1 transação" logo em seguida.
+3. A transação é comitada sem nunca formar fila — é o caso feliz, sem contenção.
+
+**Cenário 2 — Colapso da Fila (alta concorrência):**
+1. Clique em "Simular rajada (10 chegadas de uma vez)".
+2. Repare na Fila de Requisições (Lq) do diagrama saltando para 10 itens de uma vez.
+3. Clique em "Processar 1 transação" repetidamente e note quanto tempo leva pra fila esvaziar — é exatamente o efeito da Lei de Little: com λ muito maior que μ, a fila cresce muito mais rápido do que o sistema consegue drenar.
+
+**Cenário 3 — Saldo Insuficiente (falha e rollback):**
+1. Clique em "Forçar transação de alto valor (vai falhar)".
+2. Clique em "Processar 1 transação".
+3. Veja no log, em vermelho, a falha: o sistema tenta reservar o valor, detecta saldo insuficiente e faz ROLLBACK — o lock é liberado imediatamente, sem comitar nada.
+""")
+
+st.subheader("Conclusão")
+st.markdown("""
+O bloqueio pessimista garante consistência de forma simples e robusta, mas ao custo de criar um gargalo (um único ponto de serialização) que impede a escalabilidade horizontal para um recurso de alta contenção. É uma estratégia eficaz quando o volume de transações concorrentes para o mesmo recurso é baixo — o problema aparece quando a fila cresce mais rápido do que o sistema consegue processar.
+""")
+
+with st.expander("Aprofundar: por que a fila cresce (Lei de Little e filas M/D/1)"):
+    st.markdown(r"""
 **Interpretação da Simulação:**
-- **Taxa de Chegada (λ):** Cada clique no botão "Gerar Chegada" simula uma nova transação chegando ao sistema.
-- **Taxa de Serviço (μ):** O clique em "Executar Ciclo" representa um único ciclo de processamento do banco de dados (o tempo para executar a lógica de negócio e o COMMIT).
+- **Taxa de Chegada (λ):** Cada clique no botão "Nova transação chegou" simula uma nova transação chegando ao sistema.
+- **Taxa de Serviço (μ):** O clique em "Processar 1 transação" representa um único ciclo de processamento do banco de dados (o tempo para executar a lógica de negócio e o COMMIT).
 
 **Observação Empírica:**
 A simulação demonstra um princípio fundamental da **Teoria das Filas**. O sistema se comporta como uma fila do tipo **M/D/1** (Chegadas de Markov, Tempo de Serviço Determinístico, 1 Servidor). O "servidor" é o lock da conta, que só pode atender uma transação por vez.
 
-Ao aumentar a frequência de chegadas (clicar em "Gerar Chegada" mais rápido do que em "Executar Ciclo"), a **Fila de Requisições (Lq)** começa a crescer. Este é o efeito previsto pela **Lei de Little ($L = \lambda W$)**:
+Ao aumentar a frequência de chegadas (clicar em "Nova transação chegou" mais rápido do que em "Processar 1 transação"), a **Fila de Requisições (Lq)** começa a crescer. Este é o efeito previsto pela **Lei de Little ($L = \lambda W$)**:
 1.  Quando a taxa de chegada ($\lambda$) é significativamente menor que a taxa de serviço ($\mu$), a fila permanece vazia ou pequena.
 2.  À medida que $\lambda$ se aproxima de $\mu$, o tempo de espera no sistema ($W$) para cada transação aumenta drasticamente. Como $L = \lambda W$, o tamanho da fila ($L$) também cresce de forma não-linear.
 3.  Se $\lambda \ge \mu$, a fila teoricamente cresce ao infinito, e o sistema colapsa em termos de latência.
-
-**Conclusão:** O bloqueio pessimista garante consistência de forma simples e robusta, mas ao custo de criar um gargalo (um único ponto de serialização) que impede a escalabilidade horizontal para um recurso de alta contenção. É uma estratégia eficaz quando o volume de transações concorrentes para o mesmo recurso é baixo.
 """)
 
-st.subheader("Alternativas ao Bloqueio: Arquiteturas Lock-Free (LMAX Disruptor)")
-st.markdown("""
+with st.expander("Aprofundar: alternativas ao bloqueio e referências"):
+    st.markdown("""
+**Alternativas ao Bloqueio: Arquiteturas Lock-Free (LMAX Disruptor)**
+
 A principal conclusão do modelo pessimista é que **locks são gargalos**. Em sistemas de altíssima frequência (HFT), a contenção por locks é inaceitável. A arquitetura **LMAX Disruptor**, desenvolvida para uma bolsa de valores de Londres, popularizou o **"Single Writer Principle"** (Princípio do Escritor Único).
 A ideia é redesenhar a arquitetura para que, por design, apenas **uma única thread** tenha permissão para modificar um recurso crítico. Se não há múltiplos escritores, não há concorrência pela escrita, e, portanto, **não há necessidade de locks**.
 Isto é frequentemente alcançado com filas em memória e particionamento de dados, onde cada partição é "possuída" por uma thread. Este conceito é a base para o "Padrão Agregador" que veremos mais adiante, onde o Kafka garante que todas as transações de uma conta sejam processadas por um único consumidor.
-""")
 
+---
 
-st.markdown("---")
-st.subheader("Referências e Leitura Adicional")
-st.markdown("""
+**Referências e Leitura Adicional**
 - **Bernstein, P. A., & Newcomer, E. (2009).** *Principles of Transaction Processing*. Morgan Kaufmann. (Capítulos sobre Two-Phase Locking).
 - **Gray, J., & Reuter, A. (1992).** *Transaction Processing: Concepts and Techniques*. Morgan Kaufmann.
 - **Thompson, M. et al.** "LMAX Disruptor: High Performance Inter-Thread Messaging Library". *LMAX Exchange*. (Apresenta o conceito de design mecânico e o Single Writer Principle).

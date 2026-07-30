@@ -1,7 +1,6 @@
 import streamlit as st
 import graphviz
 
-st.set_page_config(layout="wide", page_title="Arquitetura de Referência")
 
 st.title("Arquitetura de Referência: Padrão Agregador em um Sistema de Pagamentos")
 st.markdown("---")

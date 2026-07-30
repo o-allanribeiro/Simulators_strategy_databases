@@ -1,7 +1,6 @@
 import streamlit as st
 import graphviz
 
-st.set_page_config(layout="wide", page_title="Estudo de Caso 2: Controle de Concorrência Otimista")
 
 # --- Estado da Simulação ---
 def inicializar_estado_occ():
@@ -81,7 +80,6 @@ def desenhar_occ_diagram():
     return dot
 
 # --- Início da Renderização da Página ---
-st.set_page_config(layout="wide", page_title="Estudo de Caso 2: Controle de Concorrência Otimista")
 inicializar_estado_occ()
 
 st.title("Estudo de Caso 2: Controle de Concorrência Otimista (OCC)")

@@ -3,7 +3,6 @@ import graphviz
 import random
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="Estudo de Caso 3: Sharding e Hot Partitions")
 
 # --- Estado da Simulação ---
 def inicializar_estado():
@@ -23,8 +22,11 @@ def reset_simulation():
     st.session_state.log = ["Simulação reiniciada."]
     st.session_state.total_requests = 0
     st.session_state.throttled_requests = 0
-    # A linha abaixo foi removida para corrigir o StreamlitAPIException
-    # st.session_state.strategy = "Single Partition"
+    # O widget de estratégia (key='strategy') já foi instanciado neste run, então não dá
+    # pra reatribuir st.session_state.strategy aqui diretamente (StreamlitAPIException).
+    # Em vez disso, marcamos um flag e aplicamos o reset no topo do script, antes do
+    # widget ser recriado no próximo rerun.
+    st.session_state._reset_strategy_pending = True
 
 # --- Lógica da Simulação ---
 def run_simulation(strategy, tps):
@@ -40,12 +42,12 @@ def run_simulation(strategy, tps):
             shard['wcu'] = 1000
             for _ in range(accepted_tps):
                 shard['requests'].append(1)
-            log_entry = f"🔴 Throttling! {throttled_tps} reqs rejeitadas. Partição 0 no limite."
+            log_entry = f"THROTTLING: {throttled_tps} reqs rejeitadas. Partição 0 no limite."
         else:
             shard['wcu'] += tps
             for _ in range(tps):
                 shard['requests'].append(1)
-            log_entry = f"🟢 {tps} reqs aceitas no Shard 0."
+            log_entry = f"OK: {tps} reqs aceitas no Shard 0."
     
     else: # Write Sharding
         for _ in range(tps):
@@ -53,7 +55,7 @@ def run_simulation(strategy, tps):
             shard = st.session_state.shards[target_shard_index]
             shard['wcu'] += 1
             shard['requests'].append(1)
-        log_entry = f"🟢 {tps} reqs distribuídas aleatoriamente entre 10 shards."
+        log_entry = f"OK: {tps} reqs distribuídas aleatoriamente entre 10 shards."
     
     st.session_state.log.insert(0, log_entry)
 
@@ -87,7 +89,7 @@ def create_graph(shards, strategy, tps):
                 pk = "PK: CONTA-123"
                 color = 'salmon' if hot else 'lightgrey'
                 label = f"Shard {i}\n({pk})\nWCU: {wcu}\nReqs: {req_count}"
-                if hot: label += "\n🔥 HOT PARTITION 🔥"
+                if hot: label += "\nHOT PARTITION"
             elif strategy == "Single Partition" and i > 0:
                 color = 'whitesmoke'
                 label = f"Shard {i}\n(Inativo)"
@@ -101,11 +103,18 @@ def create_graph(shards, strategy, tps):
     return dot
 
 # --- UI ---
-st.set_page_config(layout="wide")
 inicializar_estado()
 
+if st.session_state.get("_reset_strategy_pending"):
+    st.session_state.strategy = "Single Partition"
+    st.session_state._reset_strategy_pending = False
+
 st.title("Estudo de Caso 3: Sharding e o Problema da 'Hot Partition'")
-st.markdown("...") # Conteúdo textual omitido para brevidade...
+st.markdown("---")
+st.markdown("""
+### Resumo
+Este experimento simula um problema comum em bancos de dados NoSQL como o DynamoDB: quando todas as escritas de uma conta de altíssimo volume ("hot account") vão para a mesma chave de partição, essa partição física tem um limite de capacidade (WCU/s) que pode ser excedido, causando **throttling** (rejeição de requisições). A estratégia de **Write Sharding** resolve isso distribuindo as escritas dessa mesma conta lógica entre múltiplas partições físicas, usando um sufixo aleatório na chave de partição.
+""")
 
 col1, col2 = st.columns([1, 2])
 

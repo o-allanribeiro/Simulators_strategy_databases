@@ -2,9 +2,7 @@ import streamlit as st
 import graphviz
 from collections import defaultdict
 import pandas as pd
-import json
 
-st.set_page_config(layout="wide", page_title="Estudo de Caso 4: Otimização de Liquidez com Grafos")
 
 # --- Lógica da Simulação (Refatorada para Clareza) ---
 
@@ -72,25 +70,41 @@ def find_cycles(graph):
 
 st.title("Estudo de Caso 4: Otimização de Liquidez com Teoria dos Grafos")
 st.markdown("---")
+
+st.header("O problema, em uma frase")
+st.info(
+    "Se um grupo de pessoas (ou bancos) deve dinheiro uns aos outros formando um ciclo fechado, "
+    "às vezes ninguém precisa pagar nada de verdade — as dívidas se cancelam sozinhas. O desafio é "
+    "**encontrar esses ciclos automaticamente**, mesmo quando existem milhares de dívidas cruzadas."
+)
+
+st.subheader("Um exemplo do dia a dia")
 st.markdown("""
-### Resumo
-Este estudo avança das otimizações no nível de armazenamento de dados para uma otimização no nível de processo de negócio: a **economia de liquidez em sistemas de pagamento**. Em sistemas de liquidação bruta em tempo real (RTGS), pode ocorrer um fenômeno de **Gridlock** (impasse sistêmico). Esta simulação demonstra um **Mecanismo de Economia de Liquidez (LSM)** que utiliza a teoria dos grafos para resolver esses impasses através de "netting", uma abordagem fundamentada nos algoritmos de **Bech & Soramäki (2001)**. Ao final, detalhamos as aplicações práticas desta teoria em sistemas de pagamento, câmaras de compensação e tesouraria corporativa.
+Imagine três amigos: **Ana deve R$ 100 para Bruno**, **Bruno deve R$ 100 para Carla**, e **Carla deve R$ 100 para Ana**.
+
+Se cada um pagar sua dívida separadamente, R$ 300 precisam trocar de mãos. Mas se os três se sentarem numa mesa e compararem as contas, vão perceber que **ninguém precisa pagar nada** — a dívida de cada um cancela exatamente o que tem a receber. É um ciclo fechado.
+
+Agora troque "Ana, Bruno e Carla" por **bancos**, e "R$ 100" por **milhões de reais em pagamentos entre instituições financeiras por dia**. É exatamente esse tipo de ciclo que a simulação abaixo encontra — automaticamente, entre vários participantes e transações.
 """)
+
+with st.expander("Como o algoritmo encontra esses ciclos (aprofundamento técnico)"):
+    st.markdown("""
+    1.  **Modelagem do Grafo:** As obrigações de pagamento pendentes são modeladas como um grafo direcionado. Cada instituição é um nó, e uma obrigação de `U` para `V` é uma aresta `U -> V`.
+    2.  **Detecção de Ciclos:** Um impasse ("gridlock") se manifesta como um ciclo no grafo (e.g., A deve a B, que deve a C, que deve a A). Usamos um algoritmo de Busca em Profundidade (DFS) para encontrar esses ciclos.
+    3.  **Validação para Netting (Compensação):** Para cada ciclo, o sistema atua como uma **câmara de compensação**. Para cada participante do ciclo, somamos todas as suas **transações de crédito** (dinheiro a receber de outros no ciclo) e subtraímos todas as suas **transações de débito** (dinheiro a pagar a outros no ciclo). Se o resultado (o fluxo líquido) for zero para todos, o ciclo se anula.
+
+    Em sistemas reais, esse mecanismo é chamado de **Liquidity Saving Mechanism (LSM)**, e o impasse sistêmico que ele evita é conhecido como **Gridlock** — baseado nos algoritmos descritos por **Bech & Soramäki (2001)**.
+    """)
 st.markdown("---")
 
-st.header("Metodologia: Modelagem de Gridlock com Grafos")
-st.markdown("""
-1.  **Modelagem do Grafo:** As obrigações de pagamento pendentes são modeladas como um grafo direcionado. Cada instituição é um nó, e uma obrigação de `U` para `V` é uma aresta `U -> V`.
-2.  **Detecção de Ciclos:** Um impasse ("gridlock") se manifesta como um ciclo no grafo (e.g., A deve a B, que deve a C, que deve a A). Usamos um algoritmo de Busca em Profundidade (DFS) para encontrar esses ciclos.
-3.  **Validação para Netting (Compensação):** Para cada ciclo, o sistema atua como uma **câmara de compensação**. Para cada participante do ciclo, somamos todas as suas **transações de crédito** (dinheiro a receber de outros no ciclo) e subtraímos todas as suas **transações de débito** (dinheiro a pagar a outros no ciclo). Se o resultado (o fluxo líquido) for zero para todos, o ciclo se anula.
-""")
-st.markdown("---")
-
-st.header("Simulação Interativa")
+st.header("Agora com o exemplo dos bancos")
+st.markdown("Abaixo estão 7 pagamentos pendentes entre 6 bancos. Alguns formam ciclos fechados (podem ser cancelados), outros não — veja se você consegue identificar algum antes de ler a análise.")
 
 transactions = get_transactions()
-st.subheader("1. Obrigações de Pagamento Pendentes")
-st.table(pd.DataFrame(transactions))
+st.subheader("1. Quem deve o quê")
+st.table(
+    pd.DataFrame(transactions).rename(columns={"from": "Deve (de)", "to": "Para", "amount": "Valor ($M)"})
+)
 
 adjacency_list = defaultdict(list)
 all_participants = set()
@@ -111,27 +125,28 @@ for tx in transactions:
 for (source, dest), amount in edge_labels.items():
     dot.edge(source, dest, label=f"${amount}M")
 
-st.subheader("2. Grafo de Dependências Financeiras")
+st.subheader("2. O mesmo, em forma de grafo")
+st.caption("Cada seta é uma dívida: o banco na base da seta deve para o banco na ponta.")
 st.graphviz_chart(dot)
 
-st.subheader("3. Análise de Ciclos para Netting")
+st.subheader("3. Quais ciclos podem ser cancelados?")
 found_cycles = find_cycles(adjacency_list)
 
 if not found_cycles:
-    st.info("Nenhum ciclo de dependência encontrado no grafo.")
+    st.info("Nenhum ciclo foi encontrado — ou seja, nenhuma dívida pode ser cancelada aqui, todas precisam ser pagas em dinheiro real.")
 else:
-    st.write(f"Foram detectados **{len(found_cycles)}** ciclos de dependência claros:")
+    st.write(f"O algoritmo encontrou **{len(found_cycles)}** ciclo(s) de dívida no grafo acima:")
     for i, cycle in enumerate(found_cycles):
         cycle_nodes = set(cycle)
-        cycle_path = " -> ".join(cycle + [cycle[0]])
+        cycle_path = " → ".join(cycle + [cycle[0]])
         st.markdown(f"#### Ciclo {i+1}: `{cycle_path}`")
 
         with st.container(border=True):
             col1, col2 = st.columns([1, 2])
             with col1:
-                st.write("**Cálculo de Fluxo Líquido:**")
+                st.write("**Quanto cada um deve e vai receber neste ciclo:**")
                 cycle_transactions = [tx for tx in transactions if tx["from"] in cycle_nodes and tx["to"] in cycle_nodes]
-                
+
                 net_flows = defaultdict(float)
                 total_liquidity_in_cycle = 0
                 for tx in cycle_transactions:
@@ -141,17 +156,20 @@ else:
                         total_liquidity_in_cycle += tx["amount"]
 
                 is_optimizable = all(abs(net_flows.get(node, 0)) < 0.001 for node in cycle_nodes) and net_flows
-                
-                formatted_flows = {k: f"{v:+.2f}M" for k, v in net_flows.items()}
-                st.code(json.dumps(formatted_flows, indent=2), language='json')
+
+                flow_rows = [
+                    {"Participante": node, "Saldo líquido ($M)": f"{v:+.2f}"} for node, v in net_flows.items()
+                ]
+                st.dataframe(pd.DataFrame(flow_rows), hide_index=True, width="stretch")
+                st.caption("Positivo = tem a receber no fim das contas. Negativo = ainda deve. Zero = a conta fecha sozinha.")
 
             with col2:
                 if is_optimizable:
-                    st.success("**Ciclo Otimizável**")
-                    st.markdown(f"O fluxo líquido é zero para todos os participantes. Um total de **${total_liquidity_in_cycle}M** em liquidez pode ser liberado por compensação.")
+                    st.success("Este ciclo se cancela sozinho")
+                    st.markdown(f"Ninguém precisa transferir dinheiro de verdade. Um total de **${total_liquidity_in_cycle}M** em pagamentos pode ser liberado só por compensação — como no exemplo da Ana, Bruno e Carla.")
                 else:
-                    st.error("**Ciclo Não Otimizável**")
-                    st.markdown("Os fluxos líquidos não se anulam perfeitamente.")
+                    st.error("Este ciclo não se cancela por completo")
+                    st.markdown("As dívidas não se anulam perfeitamente — sobra uma diferença que só se resolve com dinheiro real (veja quem ficou com saldo positivo ou negativo na tabela ao lado).")
 st.markdown("---")
 
 st.header("Análise dos Resultados e Implicações")
