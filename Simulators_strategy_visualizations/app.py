@@ -60,7 +60,7 @@ O **Teorema PACELC (Abadi, 2012)** refina essa noção para o mundo real, argume
 
 
 st.subheader("2.2. A Física da Performance: Teoria das Filas e Lei de Little")
-st.markdown("""
+st.markdown(r"""
 A performance de sistemas transacionais pode ser modelada pela **Teoria das Filas**. A **Lei de Little (1961)**, expressa como $L = \lambda W$, é particularmente poderosa. Ela afirma que o número médio de itens em um sistema ($L$, o "tamanho da fila") é igual à taxa média de chegada desses itens ($\lambda$, transações por segundo) multiplicada pelo tempo médio de permanência de um item no sistema ($W$, a latência).
 
 Em um modelo de **bloqueio pessimista**, onde o acesso a um recurso é serializado, o sistema se comporta como uma fila M/D/1. Se a taxa de chegada ($\lambda$) se aproxima da taxa de serviço ($\mu$), a latência ($W$) e, consequentemente, o tamanho da fila ($L$), crescem de forma não-linear, tendendo ao infinito.

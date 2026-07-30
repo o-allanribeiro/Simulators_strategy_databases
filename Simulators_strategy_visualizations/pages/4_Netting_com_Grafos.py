@@ -156,15 +156,15 @@ st.markdown("---")
 
 st.header("Análise dos Resultados e Implicações")
 st.markdown("""
-A simulação agora demonstra de forma clara os dois cenários encontrados por uma câmara de compensação.
+A simulação demonstra de forma clara os dois cenários que uma câmara de compensação ("clearing house") pode encontrar.
 
--   **No Ciclo 1 (`A -> B -> C -> A`):** As obrigações se anulam perfeitamente.
-    -   **Para o Banco A:** A transação `C -> A` é um **crédito** de $10M, enquanto a `A -> B` é um **débito** de $10M. O fluxo líquido é zero.
-    -   **Resultado:** O sistema pode liquidar $30M em obrigações com uma necessidade de liquidez de **zero**.
+-   **No Ciclo 1 (`Banco A -> Banco B -> Banco C -> Banco A`):** As obrigações se anulam perfeitamente, permitindo a compensação.
+    -   **Análise para o Participante A:** A transação `C -> A` representa um **crédito** de $10M (a receber), enquanto a transação `A -> B` representa um **débito** de $10M (a pagar). O balanço é zero. O mesmo se aplica aos participantes B e C.
+    -   **Resultado:** O sistema liquida $30M em valor total com uma necessidade de liquidez real de **zero**.
 
--   **No Ciclo 2 (`X -> Y -> Z -> X`):** As obrigações não são simétricas.
-    -   **Para o Banco Z:** O **crédito** de `Y -> Z` é de $8M, mas o **débito** de `Z -> X` é de $7M. O fluxo líquido é de +$1M.
-    -   **Resultado:** Como o fluxo não é zero para todos os participantes, o ciclo não pode ser liquidado inteiramente por compensação e exigirá liquidez real para ser resolvido.
+-   **No Ciclo 2 (`Banco X -> Banco Y -> Banco Z -> Banco X`):** As obrigações não são simétricas.
+    -   **Análise para o Participante Z:** O **crédito** recebido de `Y -> Z` é de $8M, mas o **débito** devido em `Z -> X` é de apenas $7M. Isso resulta em um saldo positivo de +$1M para Z.
+    -   **Resultado:** O ciclo não pode ser completamente compensado. A liquidação exigirá o uso de fundos reais para cobrir as diferenças.
 """)
 st.markdown("---")
 
