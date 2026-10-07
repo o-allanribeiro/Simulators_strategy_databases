@@ -168,18 +168,24 @@ st.markdown("""
 A grande desvantagem do Write Sharding é que a leitura do saldo total se torna uma operação complexa e cara. Para saber o saldo da `CONTA-123`, a aplicação precisa consultar **todos os 10 shards** e somar os resultados, um padrão conhecido como **Scatter-Gather**.
 """)
 
-st.subheader("Case de Mercado: A 'Camada Zero' e o 'Shadow Ledger' do Itaú")
+st.subheader("Contexto de mercado: Pix na AWS")
 st.markdown("""
-A arquitetura de desacoplamento e uso de um banco de dados NoSQL para alta performance não é apenas teórica. Em palestras, a engenharia do Itaú descreveu sua **"Camada Zero"**, uma arquitetura de "shadow ledger" criada para suportar o volume do Pix.
-- **O Problema:** O sistema de core bancário (Mainframe) não foi projetado para a disponibilidade 24/7 e o volume de TPS do Pix.
-- **A Solução:** Eles criaram uma camada de microsserviços na AWS que recebe as transações do Pix. O saldo autoritativo para o canal digital passou a residir em um banco de dados NoSQL altamente escalável. Este "ledger sombra" processa as transações em tempo real usando padrões como o Write Sharding.
-- **Consistência Eventual:** O Mainframe é então atualizado de forma assíncrona, em lote, para fins contábeis e regulatórios.
-Isto valida a abordagem de usar a ferramenta certa para o trabalho certo: um sistema de altíssima performance para o tempo real e o sistema legado para a contabilidade em batch.
+Arquiteturas de desacoplamento com bancos NoSQL e isolamento de falhas não são apenas teóricas.
+Segundo material público da AWS (estudo de caso do Pix do Itaú e apresentação no AWS re:Invent
+sobre a migração do mainframe), o Itaú construiu o serviço Pix na AWS com uma **arquitetura
+baseada em células** e usa **DynamoDB com transações (`TransactWriteItems`)** para manter a
+precisão dos saldos.
+
+> **Escopo desta página:** o simulador acima é uma **ilustração didática** dos conceitos de
+> hot partition e write sharding. Ele **não reproduz** a implementação de nenhuma instituição,
+> e os detalhes internos de arquiteturas reais não são descritos aqui.
 """)
 
 st.markdown("---")
 st.subheader("Referências e Leitura Adicional")
 st.markdown("""
 - **DeCandia, G., et al. (2007).** "Dynamo: Amazon's Highly Available Key-value Store". *Symposium on Operating Systems Principles (SOSP)*.
-- **AWS Documentation & Itaú Engineering Blogs.** "Choosing the Right Partition Key", "Write Sharding for Hot Partitions", e "Cell-Based Architecture".
+- **AWS.** *Itaú Unibanco Accelerates Pix Instant Payment System Development Using AWS* (estudo de caso): <https://aws.amazon.com/solutions/case-studies/itau-pix>
+- **AWS Documentation (Amazon DynamoDB).** Boas práticas para chaves de partição e uso de *write sharding* para distribuir cargas de escrita.
+- **AWS Well-Architected.** *Reducing the Scope of Impact with Cell-Based Architecture*.
 """)
